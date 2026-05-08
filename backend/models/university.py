@@ -21,9 +21,12 @@ class University(Base):
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # RSA public key stored as PEM text.
-    # Private key is NEVER stored here — it's generated and returned
-    # once to the admin, then discarded server-side.
+    # Safe to store in plaintext — it is designed to be public.
     public_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # RSA private key stored as Fernet-encrypted bytes, then base64-encoded to text.
+    # Never returned via any API response. Decrypted in-process only during signing.
+    encrypted_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     trust_status: Mapped[TrustStatus] = mapped_column(
         SAEnum(TrustStatus), default=TrustStatus.PENDING, nullable=False
@@ -33,7 +36,6 @@ class University(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="university")
     batches: Mapped[list["CertificateBatch"]] = relationship(
         "CertificateBatch", back_populates="university"

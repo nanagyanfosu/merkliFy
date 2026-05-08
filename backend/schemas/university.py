@@ -16,14 +16,31 @@ class UniversityResponse(BaseModel):
     official_email: str
     domain: str
     trust_status: TrustStatus
+    # public_key is safe to expose — it is designed to be public
+    public_key: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
-class ApproveUniversityResponse(BaseModel):
-    university: UniversityResponse
-    # RSA private key returned ONCE to the admin to hand to the university.
-    # Never stored on the server.
-    private_key_pem: str
+class RegisterUniversityResponse(BaseModel):
+    """
+    Returned after university registration.
+
+    Contains NO private key material.
+    The encrypted_private_key column exists in the DB but is never
+    included in any Pydantic schema — it has no path to any API response.
+    """
+    id: int
+    university_name: str
+    public_key: str
+    trust_status: TrustStatus
+    message: str
+
+    model_config = {"from_attributes": True}
+
+
+class TrustStatusUpdateResponse(BaseModel):
+    university_id: int
+    new_status: TrustStatus
     message: str
