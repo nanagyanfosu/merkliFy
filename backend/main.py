@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
-from backend.routers import auth, admin
+from backend.routers import auth, admin, issuer
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -20,6 +20,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(issuer.router)
 
 
 @app.get("/health")
