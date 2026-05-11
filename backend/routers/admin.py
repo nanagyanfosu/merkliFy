@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.dependencies import require_admin
 from backend.models.user import User
+from backend.models.verification_log import VerificationLog
+from backend.models.certificate import CertificateRecord
 from backend.schemas.university import (
     CreateUniversityRequest,
     RegisterUniversityResponse,
@@ -77,4 +79,52 @@ def create_issuer(
         "email": user.email,
         "university_id": user.university_id,
         "message": "Issuer account created. User must change password on first login.",
+    }
+
+@router.get(
+    "/verification-logs",
+    summary="Query verification audit logs",
+    description="Returns recent verification attempts. Filterable by result and serial number.",
+)
+def get_verification_logs(
+    result_filter: str | None = None,
+    serial_number: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    query = db.query(VerificationLog)
+
+    if result_filter:
+        query = query.filter(VerificationLog.verification_result == result_filter.upper())
+
+    if serial_number:
+        query = query.filter(
+            VerificationLog.serial_number == serial_number.strip().lower()
+        )
+
+    total = query.count()
+    logs = (
+        query.order_by(VerificationLog.timestamp.desc())
+        .offset(offset)
+        .limit(min(limit, 500))  # hard cap to prevent memory abuse
+        .all()
+    )
+
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "logs": [
+            {
+                "id": log.id,
+                "serial_number": log.serial_number,
+                "fullname": log.fullname,
+                "result": log.verification_result,
+                "ip_address": log.ip_address,
+                "timestamp": log.timestamp.isoformat(),
+            }
+            for log in logs
+        ],
     }
