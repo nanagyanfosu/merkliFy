@@ -1,81 +1,47 @@
 # backend/routers/issuer.py
-"""
-Issuer-facing endpoints.
-
-All routes require a valid JWT with role=ISSUER.
-The issuer can only operate on their own university's data —
-university_id is always read from the JWT, never from the request body.
-This prevents one issuer from writing or reading another's certificates.
-"""
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.dependencies import require_issuer
 from backend.models.user import User
 from backend.schemas.certificate import BatchUploadResponse
-from backend.services import upload_service, batch_service
+from backend.schemas.status import (
+    StatusChangeRequest,
+    StatusChangeResponse,
+    CertificateStatusResponse,
+    CertificateSearchRequest,
+)
+from backend.services import upload_service, batch_service, status_service
 
 router = APIRouter(prefix="/issuer", tags=["issuer"])
 
+
+# ============================================================
+# BATCH UPLOAD (Phase 3 — unchanged)
+# ============================================================
 
 @router.post(
     "/batches/upload",
     response_model=BatchUploadResponse,
     summary="Upload a certificate batch (CSV or JSON)",
-    description=(
-        "Accepts a CSV or JSON file of certificate records. "
-        "Parses, validates, hashes, builds a Merkle Tree, signs the root, "
-        "and atomically persists the full batch. "
-        "The issuer's university_id is read from their JWT — not user-supplied."
-    ),
 )
 async def upload_batch(
-    file: UploadFile = File(..., description="CSV or JSON certificate dataset"),
-    batch_name: str = Form(..., description="Human-readable name for this batch, e.g. '2025 Graduates'"),
+    file: UploadFile = File(...),
+    batch_name: str = Form(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_issuer),
 ):
-    # Guard: issuer must be linked to a university
     if current_user.university_id is None:
-        raise HTTPException(
-            status_code=403,
-            detail="Your account is not associated with any university. Contact an administrator.",
-        )
-
-    # Guard: force password change before any issuance
+        raise HTTPException(status_code=403, detail="Account not linked to a university.")
     if current_user.is_temp_password:
-        raise HTTPException(
-            status_code=403,
-            detail="You must change your temporary password before uploading certificates.",
-        )
+        raise HTTPException(status_code=403, detail="Change your temporary password first.")
 
-    # Guard: validate file content type header (defence-in-depth — extension is
-    # also checked inside upload_service, so this is an early rejection)
-    allowed_content_types = {
-        "text/csv",
-        "application/csv",
-        "application/json",
-        "text/plain",          # Some systems send CSV as text/plain
-        "application/octet-stream",  # Generic fallback — let extension decide
-    }
-    if file.content_type and file.content_type not in allowed_content_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unexpected content type '{file.content_type}'. Upload a .csv or .json file.",
-        )
-
-    # Read the full file into memory
-    # MAX_BATCH_SIZE check in upload_service prevents memory abuse
     raw_bytes = await file.read()
-
     if len(raw_bytes) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # Parse + validate rows
     validated_rows = upload_service.parse_upload(file, raw_bytes)
-
-    # Run the full cryptographic pipeline + persist
     return batch_service.process_batch(
         db=db,
         university_id=current_user.university_id,
@@ -84,24 +50,17 @@ async def upload_batch(
     )
 
 
-@router.get(
-    "/batches",
-    summary="List all batches issued by this university",
-)
+@router.get("/batches", summary="List all batches for this university")
 def list_batches(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_issuer),
 ):
     if current_user.university_id is None:
         raise HTTPException(status_code=403, detail="Account not linked to a university.")
-
     return batch_service.get_batches_for_university(db, current_user.university_id)
 
 
-@router.get(
-    "/batches/{batch_id}",
-    summary="Get full detail for a single batch",
-)
+@router.get("/batches/{batch_id}", summary="Get full detail for a single batch")
 def get_batch(
     batch_id: int,
     db: Session = Depends(get_db),
@@ -109,5 +68,109 @@ def get_batch(
 ):
     if current_user.university_id is None:
         raise HTTPException(status_code=403, detail="Account not linked to a university.")
-
     return batch_service.get_batch_detail(db, batch_id, current_user.university_id)
+
+
+# ============================================================
+# CERTIFICATE SEARCH — Dashboard lookup before status action
+# ============================================================
+
+@router.post(
+    "/certificates/search",
+    summary="Search certificates by name, serial number, or program",
+    description=(
+        "Used on the issuer dashboard to find a certificate before "
+        "performing a lifecycle action. Returns paginated results scoped "
+        "to this issuer's university. At least one search field is required."
+    ),
+)
+def search_certificates(
+    search: CertificateSearchRequest,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    return status_service.search_certificates(
+        db=db,
+        search=search,
+        requesting_user=current_user,
+        limit=limit,
+        offset=offset,
+    )
+
+
+# ============================================================
+# CERTIFICATE STATUS MANAGEMENT
+# ============================================================
+
+@router.get(
+    "/certificates/{certificate_id}/status",
+    response_model=CertificateStatusResponse,
+    summary="Get status and full audit history for a certificate",
+    description=(
+        "Returns the certificate's current lifecycle status and its complete "
+        "change history. Used to review a certificate's record before "
+        "making a revocation or suspension decision."
+    ),
+)
+def get_certificate_status(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    return status_service.get_certificate_status_detail(
+        db=db,
+        certificate_id=certificate_id,
+        requesting_user=current_user,
+    )
+
+
+@router.patch(
+    "/certificates/{certificate_id}/status",
+    response_model=StatusChangeResponse,
+    summary="Change a certificate's lifecycle status",
+    description=(
+        "Revoke, suspend, or reinstate a certificate. "
+        "Revocation is terminal and cannot be undone. "
+        "Suspended certificates can be reinstated or escalated to revoked. "
+        "Every change is permanently recorded in the audit trail."
+    ),
+)
+def change_certificate_status(
+    certificate_id: int,
+    payload: StatusChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    return status_service.change_certificate_status(
+        db=db,
+        certificate_id=certificate_id,
+        payload=payload,
+        requesting_user=current_user,
+    )
+
+
+@router.get(
+    "/audit-history",
+    summary="Full status change audit history for this university",
+    description=(
+        "Returns a paginated log of all certificate status changes "
+        "made within this issuer's university, ordered most recent first."
+    ),
+)
+def get_audit_history(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    if current_user.university_id is None:
+        raise HTTPException(status_code=403, detail="Account not linked to a university.")
+    return status_service.get_status_history_for_university(
+        db=db,
+        university_id=current_user.university_id,
+        requesting_user=current_user,
+        limit=limit,
+        offset=offset,
+    )

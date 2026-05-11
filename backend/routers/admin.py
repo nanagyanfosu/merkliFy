@@ -1,17 +1,19 @@
 # backend/routers/admin.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.dependencies import require_admin
 from backend.models.user import User
 from backend.models.verification_log import VerificationLog
-from backend.models.certificate import CertificateRecord
+from backend.models.certificate import CertificateRecord, CertificateSearchRequest
 from backend.schemas.university import (
     CreateUniversityRequest,
     RegisterUniversityResponse,
     TrustStatusUpdateResponse,
 )
+from backend.schemas.status import StatusChangeRequest, StatusChangeResponse
+from backend.services import status_service
 from backend.services import issuer_registry_service
 
 
@@ -128,3 +130,81 @@ def get_verification_logs(
             for log in logs
         ],
     }
+
+@router.post(
+    "/certificates/search",
+    summary="Search certificates across all universities (admin)",
+)
+def admin_search_certificates(
+    search: CertificateSearchRequest,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Admin can search across all universities with no university scoping.
+    """
+    return status_service.search_certificates(
+        db=db,
+        search=search,
+        requesting_user=admin,   # role=ADMIN bypasses university filter
+        limit=limit,
+        offset=offset,
+    )
+
+@router.patch(
+    "/certificates/{certificate_id}/status",
+    response_model=StatusChangeResponse,
+    summary="Admin override: change any certificate's status",
+    description=(
+        "Admin can revoke, suspend, or reinstate certificates from any university. "
+        "All changes are attributed to the admin's account in the audit trail."
+    ),
+)
+def admin_change_certificate_status(
+    certificate_id: int,
+    payload: StatusChangeRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return status_service.change_certificate_status(
+        db=db,
+        certificate_id=certificate_id,
+        payload=payload,
+        requesting_user=admin,
+    )
+
+@router.get(
+    "/certificates/{certificate_id}/status",
+    summary="Get certificate status and audit history (admin)",
+)
+def admin_get_certificate_status(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return status_service.get_certificate_status_detail(
+        db=db,
+        certificate_id=certificate_id,
+        requesting_user=admin,
+    )
+
+@router.get(
+    "/universities/{university_id}/audit-history",
+    summary="Full audit history for a specific university (admin)",
+)
+def admin_get_university_audit_history(
+    university_id: int,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return status_service.get_status_history_for_university(
+        db=db,
+        university_id=university_id,
+        requesting_user=admin,
+        limit=limit,
+        offset=offset,
+    )
