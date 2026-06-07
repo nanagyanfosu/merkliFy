@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Navigate, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { ShieldCheck, Loader2, Lock } from "lucide-react";
 
@@ -12,8 +12,7 @@ export default function AdminLoginPage() {
   const [loading, setLoading] = useState(false);
 
   if (user?.role === "ADMIN") {
-    navigate("/admin", { replace: true });
-    return null;
+    return <Navigate to="/admin" replace />;
   }
 
 const handleSubmit = async (e) => {

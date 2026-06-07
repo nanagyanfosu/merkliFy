@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Navigate, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { GraduationCap, Loader2, Lock } from "lucide-react";
 
@@ -13,8 +13,7 @@ export default function IssuerLoginPage() {
 
   // Already logged in as issuer — go straight to dashboard
   if (user?.role === "ISSUER") {
-    navigate("/issuer", { replace: true });
-    return null;
+    return <Navigate to="/issuer" replace />;
   }
 
  
