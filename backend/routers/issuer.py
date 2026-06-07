@@ -1,10 +1,11 @@
-# backend/routers/issuer.py
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.database import get_db
 from backend.dependencies import require_issuer
 from backend.models.user import User
+from backend.models.batch import CertificateBatch
+from backend.models.certificate import CertificateRecord
 from backend.schemas.certificate import BatchUploadResponse
 from backend.schemas.status import (
     StatusChangeRequest,
@@ -17,10 +18,7 @@ from backend.services import upload_service, batch_service, status_service
 router = APIRouter(prefix="/issuer", tags=["issuer"])
 
 
-# ============================================================
-# BATCH UPLOAD (Phase 3 — unchanged)
-# ============================================================
-
+# BATCH UPLOAD 
 @router.post(
     "/batches/upload",
     response_model=BatchUploadResponse,
@@ -29,6 +27,7 @@ router = APIRouter(prefix="/issuer", tags=["issuer"])
 async def upload_batch(
     file: UploadFile = File(...),
     batch_name: str = Form(...),
+    academic_year: int = Form(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_issuer),
 ):
@@ -46,6 +45,7 @@ async def upload_batch(
         db=db,
         university_id=current_user.university_id,
         batch_name=batch_name,
+        academic_year=academic_year,
         validated_rows=validated_rows,
     )
 
@@ -71,10 +71,7 @@ def get_batch(
     return batch_service.get_batch_detail(db, batch_id, current_user.university_id)
 
 
-# ============================================================
-# CERTIFICATE SEARCH — Dashboard lookup before status action
-# ============================================================
-
+# CERTIFICATE SEARCH
 @router.post(
     "/certificates/search",
     summary="Search certificates by name, serial number, or program",
@@ -100,10 +97,7 @@ def search_certificates(
     )
 
 
-# ============================================================
 # CERTIFICATE STATUS MANAGEMENT
-# ============================================================
-
 @router.get(
     "/certificates/{certificate_id}/status",
     response_model=CertificateStatusResponse,
@@ -173,4 +167,53 @@ def get_audit_history(
         requesting_user=current_user,
         limit=limit,
         offset=offset,
+    )
+
+@router.get("/stats")
+def get_issuer_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    """Returns upload statistics for the issuer's profile page."""
+    if not current_user.university_id:
+        return {"total_batches": 0, "total_certificates": 0}
+
+    total_batches = db.query(CertificateBatch).filter(
+        CertificateBatch.university_id == current_user.university_id
+    ).count()
+
+    total_certs = db.query(CertificateRecord).filter(
+        CertificateRecord.university_id == current_user.university_id
+    ).count()
+
+    return {
+        "total_batches":      total_batches,
+        "total_certificates": total_certs,
+    }
+
+@router.post("/batches/upload", response_model=BatchUploadResponse)
+async def upload_batch(
+    file:          UploadFile = File(...),
+    batch_name:    str = Form(...),
+    academic_year: int = Form(..., ge=1900, le=2100),
+    db:            Session = Depends(get_db),
+    current_user:  User = Depends(require_issuer),
+):
+    if current_user.university_id is None:
+        raise HTTPException(status_code=403, detail="Account not linked to a university.")
+    if current_user.is_temp_password:
+        raise HTTPException(status_code=403, detail="Change your temporary password first.")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    validated_rows = upload_service.parse_upload(file, raw_bytes)
+    return batch_service.process_batch(
+        db=db,
+        university_id=current_user.university_id,
+        batch_name=batch_name,
+        academic_year=academic_year,
+        validated_rows=validated_rows,
+        uploaded_by=current_user.id,         
     )

@@ -1,40 +1,13 @@
-# backend/services/batch_service.py
-"""
-Batch processing pipeline.
-
-Orchestrates the full certificate issuance flow:
-
-  validated rows
-      → hash each certificate          (hashing_service)
-      → build Merkle Tree              (merkle_service)
-      → sign the Merkle Root           (signature_service)
-      → atomic DB commit               (batch_service — this module)
-          ├── certificate_batches      (one row)
-          ├── certificate_records      (one row per cert)
-          ├── merkle_proofs            (one row per cert)
-          └── certificate_status       (one ACTIVE row per cert)
-
-ATOMICITY GUARANTEE:
-  All DB writes happen inside a single transaction.
-  If anything fails after partial writes, the entire transaction rolls back.
-  The issuer either gets a complete batch or nothing — never a partial state.
-
-IMMUTABILITY GUARANTEE:
-  Once committed, certificate_records and merkle_proofs are never modified.
-  certificate_batches.merkle_root and signed_root are never modified.
-  Only certificate_status rows are mutable (lifecycle management, Phase 5).
-"""
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
-
 from backend.models.batch import CertificateBatch
 from backend.models.certificate import CertificateRecord
 from backend.models.merkle import MerkleProof
 from backend.models.status import CertificateStatus, CertificateLifecycleStatus
 from backend.schemas.certificate import CertificateRowInput, BatchUploadResponse
 from backend.services.hashing_service import hash_certificate
-from backend.services.merkle_service import build_merkle_tree_clean
+from backend.services.merkle_service import build_merkle_tree
 from backend.services.signature_service import sign_merkle_root
 from backend.services.issuer_registry_service import get_university_for_signing
 
@@ -43,143 +16,109 @@ def process_batch(
     db: Session,
     university_id: int,
     batch_name: str,
+    academic_year: int,
     validated_rows: list[CertificateRowInput],
+    uploaded_by: int | None = None,
 ) -> BatchUploadResponse:
-    """
-    Runs the full issuance pipeline for a validated set of certificate rows.
-
-    Args:
-        db:             Active SQLAlchemy session.
-        university_id:  The issuing university's ID (from JWT token).
-        batch_name:     Human-readable name for this batch (e.g. "2025 Graduates").
-        validated_rows: Output of upload_service.parse_upload().
-
-    Returns:
-        BatchUploadResponse with batch_id, merkle_root, and count.
-
-    Raises:
-        HTTPException(403) if the university is not trusted.
-        HTTPException(409) if any serial_number already exists in the database.
-        HTTPException(500) on unexpected commit failure.
-    """
-
-    # ------------------------------------------------------------------ #
-    # STEP 1 — Verify university is trusted and has a signing key
-    # ------------------------------------------------------------------ #
     university = get_university_for_signing(db, university_id)
 
-    # ------------------------------------------------------------------ #
-    # STEP 2 — Hash every certificate
-    # ------------------------------------------------------------------ #
-    # We hash in the exact same way verification will later reconstruct:
-    # using the five canonical fields only.
-    leaf_hashes: list[str] = []
-    for row in validated_rows:
-        h = hash_certificate(
+    # The authoritative issuer string — sourced from DB, not CSV
+    canonical_issuer = university.university_name.strip().lower()
+
+    # Check for serial number duplicates within this university
+    incoming_serials = [row.serial_number for row in validated_rows]
+    already_exists = (
+        db.query(CertificateRecord.serial_number)
+        .filter(
+            CertificateRecord.university_id == university_id,
+            CertificateRecord.serial_number.in_(incoming_serials),
+        )
+        .all()
+    )
+    if already_exists:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "These serial numbers already exist for your institution.",
+                "duplicates": [r.serial_number for r in already_exists],
+            },
+        )
+
+
+    leaf_hashes = [
+        hash_certificate(
             serial_number=row.serial_number,
             fullname=row.fullname,
             program=row.program,
             graduation_year=row.graduation_year,
-            issuer=row.issuer,
+            issuer=canonical_issuer,       
         )
-        leaf_hashes.append(h)
+        for row in validated_rows
+    ]
 
-    # ------------------------------------------------------------------ #
-    # STEP 3 — Build Merkle Tree
-    # ------------------------------------------------------------------ #
-    merkle_root, proof_paths = build_merkle_tree_clean(leaf_hashes)
-    # merkle_root:  single hex string committing to the whole batch
-    # proof_paths:  list[list[dict]], one proof path per certificate
-
-    # ------------------------------------------------------------------ #
-    # STEP 4 — Sign the Merkle Root with the university's private key
-    # ------------------------------------------------------------------ #
-    # sign_merkle_root() decrypts the key internally, signs, discards key.
+    merkle_root, proof_paths = build_merkle_tree(leaf_hashes)
     signed_root = sign_merkle_root(merkle_root, university)
 
-    # ------------------------------------------------------------------ #
-    # STEP 5 — Persist everything atomically
-    # ------------------------------------------------------------------ #
     try:
         batch, cert_records = _persist_batch(
             db=db,
             university_id=university_id,
             batch_name=batch_name,
+            academic_year=academic_year,
             merkle_root=merkle_root,
             signed_root=signed_root,
             validated_rows=validated_rows,
             leaf_hashes=leaf_hashes,
             proof_paths=proof_paths,
+            canonical_issuer=canonical_issuer,
+            uploaded_by=uploaded_by,
         )
     except IntegrityError as e:
         db.rollback()
-        # Most likely cause: duplicate serial_number already in another batch
         raise HTTPException(
             status_code=409,
-            detail=(
-                "One or more serial_numbers in this batch already exist in the database. "
-                "Each certificate must have a globally unique serial_number. "
-                f"DB detail: {str(e.orig)}"
-            ),
+            detail=f"Database constraint violation: {str(e.orig)}",
         )
 
     return BatchUploadResponse(
         batch_id=batch.id,
         batch_name=batch.batch_name,
-        merkle_root=batch.merkle_root,
+        academic_year=batch.academic_year,
         total_certificates=batch.total_certificates,
         message=(
-            f"Batch '{batch_name}' successfully issued. "
+            f"Batch '{batch_name}' issued. "
             f"{len(cert_records)} certificate(s) cryptographically committed."
         ),
     )
 
 
 def _persist_batch(
-    db: Session,
-    university_id: int,
-    batch_name: str,
-    merkle_root: str,
-    signed_root: str,
-    validated_rows: list[CertificateRowInput],
-    leaf_hashes: list[str],
-    proof_paths: list[list[dict]],
-) -> tuple[CertificateBatch, list[CertificateRecord]]:
-    """
-    Writes all batch data inside a single transaction.
-
-    Write order:
-      1. certificate_batches    — needs to exist before records can FK to it
-      2. certificate_records    — need to exist before proofs/status can FK to them
-      3. merkle_proofs          — one per record
-      4. certificate_status     — one ACTIVE row per record
-
-    The session is flushed (not committed) after each group so that
-    auto-generated IDs are available for the next group's foreign keys,
-    while the full commit happens only once at the end.
-    """
-
-    # 1. Create the batch record
+    db, university_id, batch_name, academic_year,
+    merkle_root, signed_root, validated_rows,
+    leaf_hashes, proof_paths, canonical_issuer, uploaded_by,
+):
     batch = CertificateBatch(
         university_id=university_id,
         batch_name=batch_name,
+        academic_year=academic_year,
         merkle_root=merkle_root,
         signed_root=signed_root,
         total_certificates=len(validated_rows),
+        uploaded_by=uploaded_by,
     )
     db.add(batch)
-    db.flush()   # populates batch.id without committing
+    db.flush()
 
-    # 2. Create all certificate records
-    cert_records: list[CertificateRecord] = []
+    cert_records = []
     for row, leaf_hash in zip(validated_rows, leaf_hashes):
         record = CertificateRecord(
             batch_id=batch.id,
+            university_id=university_id,
             serial_number=row.serial_number,
             fullname=row.fullname,
             program=row.program,
             graduation_year=row.graduation_year,
-            issuer=row.issuer,
+            issuer=canonical_issuer,    
             student_id=row.student_id,
             classification=row.classification,
             issue_date=row.issue_date,
@@ -188,58 +127,58 @@ def _persist_batch(
         db.add(record)
         cert_records.append(record)
 
-    db.flush()   # populates record.id for each cert
+    db.flush()
 
-    # 3. Create Merkle proofs + 4. Create initial ACTIVE status
-    for record, proof_path in zip(cert_records, proof_paths):
-        proof = MerkleProof(
+    for i, (record, proof_path) in enumerate(zip(cert_records, proof_paths)):
+        db.add(MerkleProof(
             certificate_id=record.id,
-            proof_path=proof_path,       # stored as JSON
-            leaf_index=cert_records.index(record),
-        )
-        db.add(proof)
-
-        status = CertificateStatus(
+            proof_path=proof_path,
+            leaf_index=i,
+        ))
+        db.add(CertificateStatus(
             certificate_id=record.id,
             current_status=CertificateLifecycleStatus.ACTIVE,
-        )
-        db.add(status)
+        ))
 
-    # Single commit — all or nothing
     db.commit()
-
     return batch, cert_records
 
 
-def get_batches_for_university(db: Session, university_id: int) -> list[dict]:
-    """
-    Returns a summary list of all batches issued by a university.
-    Used by the issuer dashboard.
-    """
-    batches = (
-        db.query(CertificateBatch)
-        .filter(CertificateBatch.university_id == university_id)
-        .order_by(CertificateBatch.created_at.desc())
-        .all()
+def get_batches_for_university(
+    db: Session,
+    university_id: int,
+    academic_year: int | None = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+) -> list[dict]:
+    query = db.query(CertificateBatch).filter(
+        CertificateBatch.university_id == university_id
     )
+
+    # Explicit int comparison — no ambiguity between string and int
+    if academic_year is not None:
+        query = query.filter(CertificateBatch.academic_year == int(academic_year))
+
+    allowed_sort = {"batch_name", "academic_year", "created_at", "total_certificates"}
+    if sort_by not in allowed_sort:
+        sort_by = "created_at"
+
+    col = getattr(CertificateBatch, sort_by)
+    query = query.order_by(col.desc() if sort_dir == "desc" else col.asc())
+
     return [
         {
-            "batch_id": b.id,
-            "batch_name": b.batch_name,
-            "merkle_root": b.merkle_root,
+            "batch_id":           b.id,
+            "batch_name":         b.batch_name,
+            "academic_year":      b.academic_year,
             "total_certificates": b.total_certificates,
-            "created_at": b.created_at.isoformat(),
+            "created_at":         b.created_at.isoformat(),
         }
-        for b in batches
+        for b in query.all()
     ]
 
-
-def get_batch_detail(db: Session, batch_id: int, university_id: int) -> dict:
-    """
-    Returns full detail for a single batch including all certificate records.
-    Scoped to the requesting university — an issuer cannot view another
-    university's batches.
-    """
+def get_batch_detail(db, batch_id: int, university_id: int):
+    """Return full detail for a single batch scoped to a university."""
     batch = (
         db.query(CertificateBatch)
         .filter(
@@ -249,36 +188,41 @@ def get_batch_detail(db: Session, batch_id: int, university_id: int) -> dict:
         .first()
     )
     if not batch:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Batch {batch_id} not found or does not belong to your institution.",
-        )
+        raise HTTPException(status_code=404, detail="Batch not found")
 
-    certificates = (
+    certs = (
         db.query(CertificateRecord)
-        .filter(CertificateRecord.batch_id == batch_id)
+        .filter(CertificateRecord.batch_id == batch.id)
+        .order_by(CertificateRecord.id.asc())
         .all()
     )
+
+    cert_list = []
+    for c in certs:
+        proof = c.merkle_proof
+        status = c.status
+        cert_list.append({
+            "id": c.id,
+            "serial_number": c.serial_number,
+            "fullname": c.fullname,
+            "program": c.program,
+            "graduation_year": c.graduation_year,
+            "issuer": c.issuer,
+            "student_id": c.student_id,
+            "classification": c.classification,
+            "issue_date": c.issue_date,
+            "certificate_hash": c.certificate_hash,
+            "leaf_index": proof.leaf_index if proof else None,
+            "proof_path": proof.proof_path if proof else None,
+            "current_status": (status.current_status.value if status and hasattr(status.current_status, 'value') else (status.current_status if status else None)),
+            "created_at": c.created_at.isoformat(),
+        })
 
     return {
         "batch_id": batch.id,
         "batch_name": batch.batch_name,
-        "merkle_root": batch.merkle_root,
+        "academic_year": batch.academic_year,
         "total_certificates": batch.total_certificates,
         "created_at": batch.created_at.isoformat(),
-        "certificates": [
-            {
-                "id": c.id,
-                "serial_number": c.serial_number,
-                "fullname": c.fullname,
-                "program": c.program,
-                "graduation_year": c.graduation_year,
-                "issuer": c.issuer,
-                "certificate_hash": c.certificate_hash,
-                "student_id": c.student_id,
-                "classification": c.classification,
-                "issue_date": c.issue_date,
-            }
-            for c in certificates
-        ],
+        "certificates": cert_list,
     }

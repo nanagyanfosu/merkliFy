@@ -1,24 +1,6 @@
-# backend/services/status_service.py
-"""
-Certificate lifecycle management.
-
-Handles all status transitions with:
-  - State transition validation (REVOKED is terminal)
-  - University ownership enforcement (issuers only touch their own certs)
-  - Atomic two-write transaction (status update + history insert)
-  - Full audit trail with who changed what, when, and why
-
-TRANSITION RULES:
-  ACTIVE    → REVOKED    ✓  (issuer or admin)
-  ACTIVE    → SUSPENDED  ✓  (issuer or admin)
-  SUSPENDED → REVOKED    ✓  (issuer or admin — escalation)
-  SUSPENDED → ACTIVE     ✓  (issuer or admin — reinstatement)
-  REVOKED   → anything   ✗  (terminal — blocked at service layer)
-  X         → X          ✗  (no-op transitions blocked)
-"""
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-
+from sqlalchemy import or_
 from backend.models.certificate import CertificateRecord
 from backend.models.batch import CertificateBatch
 from backend.models.status import (
@@ -36,11 +18,7 @@ from backend.schemas.status import (
 )
 
 
-# ---------------------------------------------------------------------------
 # VALID TRANSITIONS TABLE
-# ---------------------------------------------------------------------------
-# Maps current_status → set of allowed new_status values.
-# Any transition not in this table is rejected.
 VALID_TRANSITIONS: dict[CertificateLifecycleStatus, set[CertificateLifecycleStatus]] = {
     CertificateLifecycleStatus.ACTIVE: {
         CertificateLifecycleStatus.REVOKED,
@@ -79,9 +57,7 @@ def change_certificate_status(
         StatusChangeResponse with full change details.
     """
 
-    # ------------------------------------------------------------------ #
     # FETCH CERTIFICATE AND ITS BATCH
-    # ------------------------------------------------------------------ #
     certificate = (
         db.query(CertificateRecord)
         .filter(CertificateRecord.id == certificate_id)
@@ -100,9 +76,8 @@ def change_certificate_status(
         .first()
     )
 
-    # ------------------------------------------------------------------ #
+
     # PERMISSION CHECK — Issuers can only manage their own university's certs
-    # ------------------------------------------------------------------ #
     if requesting_user.role == UserRole.ISSUER:
         if requesting_user.university_id != batch.university_id:
             raise HTTPException(
@@ -113,11 +88,7 @@ def change_certificate_status(
                 ),
             )
 
-    # Admin passes through — no university restriction
-
-    # ------------------------------------------------------------------ #
     # FETCH CURRENT STATUS
-    # ------------------------------------------------------------------ #
     status_record = (
         db.query(CertificateStatus)
         .filter(CertificateStatus.certificate_id == certificate_id)
@@ -125,8 +96,6 @@ def change_certificate_status(
     )
 
     if status_record is None:
-        # Defensive: should always exist after Phase 3 issuance.
-        # Create it as ACTIVE rather than crashing.
         status_record = CertificateStatus(
             certificate_id=certificate_id,
             current_status=CertificateLifecycleStatus.ACTIVE,
@@ -137,9 +106,7 @@ def change_certificate_status(
     current_status = status_record.current_status
     new_status = payload.new_status
 
-    # ------------------------------------------------------------------ #
     # NO-OP CHECK — Reject transitions to the same state
-    # ------------------------------------------------------------------ #
     if current_status == new_status:
         raise HTTPException(
             status_code=400,
@@ -149,9 +116,8 @@ def change_certificate_status(
             ),
         )
 
-    # ------------------------------------------------------------------ #
+
     # TRANSITION VALIDATION
-    # ------------------------------------------------------------------ #
     allowed = VALID_TRANSITIONS.get(current_status, set())
 
     if new_status not in allowed:
@@ -172,14 +138,11 @@ def change_certificate_status(
             ),
         )
 
-    # ------------------------------------------------------------------ #
     # ATOMIC TWO-WRITE TRANSACTION
-    # ------------------------------------------------------------------ #
-    # Write ①: Update current status record (mutable — designed for this)
+
     old_status = current_status
     status_record.current_status = new_status
 
-    # Write ②: Insert history entry (immutable audit trail)
     history_entry = CertificateStatusHistory(
         certificate_id=certificate_id,
         old_status=old_status.value,
@@ -297,7 +260,6 @@ def get_certificate_status_detail(
         history=history,
     )
 
-
 def search_certificates(
     db: Session,
     search: CertificateSearchRequest,
@@ -306,111 +268,136 @@ def search_certificates(
     offset: int = 0,
 ) -> dict:
     """
-    Searches certificates for the dashboard lookup.
-
-    This is how an issuer finds a certificate before revoking or suspending it.
-    At least one search field must be provided to prevent full-table dumps.
-
-    Scoped: issuers only see their own university's certificates.
-    Admins see all.
-
-    Returns a paginated dict with total count and matching records.
+    Searches certificate records with flexible filters and pagination.
     """
-    # Require at least one search field
-    if not any([
+
+    # Require at least one search field to prevent unscoped full-table dumps
+    has_filter = any([
         search.serial_number,
         search.fullname,
         search.program,
         search.graduation_year,
-    ]):
+        search.status,
+        search.academic_year,
+    ])
+    if not has_filter:
         raise HTTPException(
             status_code=400,
-            detail="At least one search field must be provided.",
+            detail="At least one search field is required.",
         )
 
-    query = db.query(CertificateRecord)
+    # Base query — always join batch for university scoping and year filter
+    query = (
+        db.query(CertificateRecord)
+        .join(CertificateBatch, CertificateRecord.batch_id == CertificateBatch.id)
+    )
 
-    # Scope to university for issuers
+    # Scope issuers to their own university — admins see everything
     if requesting_user.role == UserRole.ISSUER:
-        if requesting_user.university_id is None:
-            raise HTTPException(
-                status_code=403,
-                detail="Your account is not linked to any university.",
-            )
-        # Join through batch to filter by university
-        query = query.join(
-            CertificateBatch,
-            CertificateRecord.batch_id == CertificateBatch.id
-        ).filter(
+        if not requesting_user.university_id:
+            raise HTTPException(status_code=403, detail="Account not linked to a university.")
+        query = query.filter(
             CertificateBatch.university_id == requesting_user.university_id
         )
 
-    # Apply search filters
+    # ── Text filters ──────────────────────────────────────────────────────────
     if search.serial_number:
+        # Serial number: always exact case-insensitive (it is an identifier)
         query = query.filter(
-            CertificateRecord.serial_number.ilike(
-                f"%{search.serial_number.strip().lower()}%"
-            )
+            CertificateRecord.serial_number.ilike(search.serial_number.strip().lower())
         )
 
     if search.fullname:
-        query = query.filter(
-            CertificateRecord.fullname.ilike(
-                f"%{search.fullname.strip().lower()}%"
-            )
-        )
+        val = search.fullname.strip().lower()
+        if search.exact_match:
+            query = query.filter(CertificateRecord.fullname.ilike(val))
+        else:
+            query = query.filter(CertificateRecord.fullname.ilike(f"%{val}%"))
 
     if search.program:
-        query = query.filter(
-            CertificateRecord.program.ilike(
-                f"%{search.program.strip().lower()}%"
-            )
-        )
+        val = search.program.strip().lower()
+        if search.exact_match:
+            # Exact match: the full program string must match exactly
+            query = query.filter(CertificateRecord.program.ilike(val))
+        else:
+            # Contains: useful for discovery but can return broad results.
+            # UI should warn the user when result count is high.
+            query = query.filter(CertificateRecord.program.ilike(f"%{val}%"))
 
     if search.graduation_year:
         query = query.filter(
             CertificateRecord.graduation_year == search.graduation_year
         )
 
-    total = query.count()
-    records = (
-        query
-        .order_by(CertificateRecord.serial_number.asc())
-        .offset(offset)
-        .limit(min(limit, 100))
-        .all()
+    # ── Academic year (via batch) ─────────────────────────────────────────────
+    if search.academic_year:
+        query = query.filter(
+            CertificateBatch.academic_year == search.academic_year
+        )
+
+    # ── Status filter (via certificate_status join) ───────────────────────────
+    if search.status:
+        try:
+            status_enum = CertificateLifecycleStatus(search.status.upper())
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status '{search.status}'. Use ACTIVE, REVOKED, or SUSPENDED.",
+            )
+        query = (
+            query
+            .join(CertificateStatus,
+                  CertificateRecord.id == CertificateStatus.certificate_id)
+            .filter(CertificateStatus.current_status == status_enum)
+        )
+
+    # ── Sorting ───────────────────────────────────────────────────────────────
+    sort_col = getattr(CertificateRecord, search.sort_by, CertificateRecord.serial_number)
+    query = query.order_by(
+        sort_col.desc() if search.sort_dir == "desc" else sort_col.asc()
     )
 
-    # Enrich each record with its current status
-    results = []
-    for cert in records:
-        status_record = (
-            db.query(CertificateStatus)
-            .filter(CertificateStatus.certificate_id == cert.id)
-            .first()
-        )
-        results.append({
-            "certificate_id": cert.id,
-            "serial_number": cert.serial_number,
-            "fullname": cert.fullname,
-            "program": cert.program,
-            "graduation_year": cert.graduation_year,
-            "issuer": cert.issuer,
-            "current_status": (
-                status_record.current_status.value
-                if status_record
-                else "ACTIVE"
-            ),
-            "batch_id": cert.batch_id,
-        })
+    total = query.count()
+    records = query.offset(offset).limit(min(limit, 200)).all()
 
-    return {
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-        "results": results,
+    # Enrich with current status (avoid N+1 by batch loading)
+    cert_ids = [r.id for r in records]
+    status_map = {
+        s.certificate_id: s.current_status
+        for s in db.query(CertificateStatus)
+        .filter(CertificateStatus.certificate_id.in_(cert_ids))
+        .all()
     }
 
+    results = [
+        {
+            "certificate_id":  r.id,
+            "serial_number":   r.serial_number,
+            "fullname":        r.fullname,
+            "program":         r.program,
+            "graduation_year": r.graduation_year,
+            "issuer":          r.issuer,
+            "current_status":  status_map.get(r.id, CertificateLifecycleStatus.ACTIVE).value,
+            "batch_id":        r.batch_id,
+            "academic_year":   r.batch.academic_year if r.batch else None,
+        }
+        for r in records
+    ]
+
+    # Warn when contains search returns a very broad result set
+    broad_warning = (
+        not search.exact_match
+        and total > 50
+        and (search.program or search.fullname)
+    )
+
+    return {
+        "total":         total,
+        "offset":        offset,
+        "limit":         limit,
+        "results":       results,
+        "broad_warning": broad_warning,
+    }
 
 def get_status_history_for_university(
     db: Session,

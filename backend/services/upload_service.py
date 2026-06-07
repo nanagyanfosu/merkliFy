@@ -1,47 +1,63 @@
-# backend/services/upload_service.py
-"""
-Parses uploaded CSV and JSON certificate datasets.
-
-Responsibilities:
-  - Detect file type from the uploaded filename extension
-  - Parse raw bytes into row dictionaries
-  - Validate each row against CertificateRowInput schema
-  - Collect and surface ALL row-level errors before failing
-    (so the issuer sees every problem in one response, not one at a time)
-  - Reject datasets with duplicate serial_numbers within the same upload
-  - Return a clean list of CertificateRowInput objects ready for hashing
-
-This service performs NO database operations and NO cryptography.
-"""
 import csv
 import json
 import io
+import re
 from fastapi import HTTPException, UploadFile
-from pydantic import ValidationError
+from pydantic import BaseModel, field_validator, ValidationError
+from typing import Optional
 
-from backend.schemas.certificate import CertificateRowInput
 
 
-MAX_BATCH_SIZE = 10_000   # Reject uploads larger than this to prevent memory abuse
+MAX_BATCH_SIZE = 10_000
 ALLOWED_EXTENSIONS = {".csv", ".json"}
 
 
+class CertificateRowInput(BaseModel):
+    """
+    Canonical fields are lowercased and stripped on validation.
+    This ensures the stored value, the hash input, and the
+    verification lookup all use the same normalised form.
+    """
+    serial_number:   str
+    fullname:        str
+    program:         str
+    graduation_year: int
+    issuer:          str
+
+    # Optional metadata — stored as-is, not included in hash
+    student_id:     Optional[str] = None
+    classification: Optional[str] = None
+    issue_date:     Optional[str] = None
+
+    @field_validator("serial_number", "fullname", "program", "issuer")
+    @classmethod
+    def normalise_and_validate(cls, v: str) -> str:
+        v = v.strip().lower()            # ← normalise here, not just strip
+        if not v:
+            raise ValueError("Field cannot be empty")
+        if "|" in v:
+            raise ValueError("Field must not contain the '|' character")
+        return v
+
+    @field_validator("graduation_year")
+    @classmethod
+    def validate_year(cls, v: int) -> int:
+        if not (1900 <= v <= 2100):
+            raise ValueError(f"graduation_year {v} is outside the valid range 1900–2100")
+        return v
+
+    @field_validator("issue_date", mode="before")
+    @classmethod
+    def validate_issue_date(cls, v) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        v = str(v).strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", v):
+            raise ValueError("issue_date must be YYYY-MM-DD format")
+        return v
+
+
 def parse_upload(file: UploadFile, raw_bytes: bytes) -> list[CertificateRowInput]:
-    """
-    Entry point for the upload pipeline.
-
-    Detects file type, parses, validates, and deduplicates.
-
-    Args:
-        file:       The UploadFile object (used to read the filename/extension).
-        raw_bytes:  The full file content read before calling this function.
-
-    Returns:
-        List of validated CertificateRowInput objects.
-
-    Raises:
-        HTTPException(400) for any parsing, validation, or duplication error.
-    """
     filename = file.filename or ""
     ext = _get_extension(filename)
 
@@ -55,73 +71,45 @@ def parse_upload(file: UploadFile, raw_bytes: bytes) -> list[CertificateRowInput
             detail=f"Unsupported file type '{ext}'. Only .csv and .json are accepted.",
         )
 
-    if len(rows) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file contains no certificate rows.")
-
+    if not rows:
+        raise HTTPException(status_code=400, detail="Uploaded file contains no rows.")
     if len(rows) > MAX_BATCH_SIZE:
         raise HTTPException(
             status_code=400,
-            detail=f"Batch too large. Maximum is {MAX_BATCH_SIZE} certificates per upload.",
+            detail=f"Batch too large. Max {MAX_BATCH_SIZE} certificates per upload.",
         )
 
     validated = _validate_rows(rows)
-    _check_for_duplicates(validated)
-
+    _check_intra_batch_duplicates(validated)
     return validated
 
 
 def _get_extension(filename: str) -> str:
-    """Returns the lowercase file extension including the dot."""
-    if "." not in filename:
-        return ""
-    return "." + filename.rsplit(".", 1)[-1].lower()
+    return ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
 
 
 def _parse_csv(raw_bytes: bytes) -> list[dict]:
-    """
-    Parses CSV bytes into a list of row dictionaries.
-
-    Uses DictReader so column names map directly to dict keys.
-    Handles BOM-prefixed UTF-8 files (common from Excel exports).
-    """
     try:
-        text = raw_bytes.decode("utf-8-sig")   # utf-8-sig strips BOM if present
+        text = raw_bytes.decode("utf-8-sig")
     except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=400,
-            detail="CSV file is not valid UTF-8. Please save as UTF-8 before uploading.",
-        )
+        raise HTTPException(status_code=400, detail="CSV must be UTF-8 encoded.")
 
     reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV has no header row.")
 
-    # Normalise header names — strip whitespace and lowercase
-    if reader.fieldnames is None:
-        raise HTTPException(status_code=400, detail="CSV file appears to be empty or has no header row.")
-
-    rows = []
-    for raw_row in reader:
-        # Strip whitespace from both keys and values
-        row = {k.strip().lower(): (v.strip() if v else "") for k, v in raw_row.items()}
-        rows.append(row)
-
-    return rows
+    return [
+        {k.strip().lower(): (v.strip() if v else "") for k, v in row.items()}
+        for row in reader
+    ]
 
 
 def _parse_json(raw_bytes: bytes) -> list[dict]:
-    """
-    Parses JSON bytes. Accepts either:
-      - A JSON array of objects:  [{...}, {...}]
-      - A JSON object with a "certificates" key: {"certificates": [{...}]}
-    """
     try:
-        text = raw_bytes.decode("utf-8")
-        data = json.loads(text)
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="JSON file is not valid UTF-8.")
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(e)}")
+        data = json.loads(raw_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
-    # Accept both array and wrapped-object formats
     if isinstance(data, list):
         rows = data
     elif isinstance(data, dict) and "certificates" in data:
@@ -129,93 +117,45 @@ def _parse_json(raw_bytes: bytes) -> list[dict]:
     else:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "JSON must be either a top-level array of certificate objects, "
-                "or an object with a 'certificates' key containing the array."
-            ),
+            detail="JSON must be an array or an object with a 'certificates' key.",
         )
 
-    if not all(isinstance(r, dict) for r in rows):
-        raise HTTPException(status_code=400, detail="Each certificate entry must be a JSON object.")
-
-    # Normalise keys the same way as CSV
-    return [
-        {k.strip().lower(): v for k, v in row.items()}
-        for row in rows
-    ]
+    return [{k.strip().lower(): v for k, v in r.items()} for r in rows]
 
 
 def _validate_rows(rows: list[dict]) -> list[CertificateRowInput]:
-    """
-    Validates every row against CertificateRowInput.
+    validated, errors = [], []
 
-    Collects ALL errors across ALL rows before raising.
-    This means an issuer with 50 bad rows sees all 50 problems at once
-    rather than fixing them one at a time across 50 re-uploads.
-
-    Returns:
-        List of validated CertificateRowInput objects.
-
-    Raises:
-        HTTPException(422) with a structured error list if any row fails.
-    """
-    validated = []
-    errors = []
-
-    for i, row in enumerate(rows):
-        row_number = i + 1   # 1-indexed for human-readable error messages
+    for i, row in enumerate(rows, start=1):
         try:
             validated.append(CertificateRowInput(**row))
         except ValidationError as e:
             for err in e.errors():
-                field = " → ".join(str(loc) for loc in err["loc"])
                 errors.append({
-                    "row": row_number,
-                    "field": field,
+                    "row": i,
+                    "field": " → ".join(str(l) for l in err["loc"]),
                     "error": err["msg"],
                 })
 
     if errors:
         raise HTTPException(
             status_code=422,
-            detail={
-                "message": f"Validation failed for {len(errors)} field(s) across the uploaded file.",
-                "errors": errors,
-            },
+            detail={"message": f"Validation failed on {len(errors)} field(s).", "errors": errors},
         )
-
     return validated
 
 
-def _check_for_duplicates(validated: list[CertificateRowInput]) -> None:
-    """
-    Ensures no two rows in this upload share the same serial_number.
-
-    Serial numbers must be globally unique, but we can catch intra-batch
-    duplicates here before touching the database.
-
-    Raises:
-        HTTPException(400) listing all duplicate serial numbers found.
-    """
-    seen = {}
-    duplicates = []
-
+def _check_intra_batch_duplicates(validated: list[CertificateRowInput]) -> None:
+    seen, dupes = {}, []
     for i, cert in enumerate(validated):
-        sn = cert.serial_number.lower()
+        sn = cert.serial_number   # already normalised to lowercase
         if sn in seen:
-            duplicates.append({
-                "serial_number": cert.serial_number,
-                "first_seen_at_row": seen[sn] + 1,
-                "duplicate_at_row": i + 1,
-            })
+            dupes.append({"serial_number": sn, "first_at_row": seen[sn] + 1, "duplicate_at_row": i + 1})
         else:
             seen[sn] = i
 
-    if duplicates:
+    if dupes:
         raise HTTPException(
             status_code=400,
-            detail={
-                "message": "Duplicate serial_numbers detected within the uploaded file.",
-                "duplicates": duplicates,
-            },
+            detail={"message": "Duplicate serial_numbers in this file.", "duplicates": dupes},
         )
