@@ -1,4 +1,3 @@
-# backend/config.py
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -10,10 +9,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
-     # Private key encryption
-    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-    # Store in .env — never commit this value to version control.
+    # Private key encryption
+    # python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     PRIVATE_KEY_ENCRYPTION_KEY: str
+    SETUP_KEY: str  
+    #python -c "import secrets; print(secrets.token_hex(32))"
 
     # App
     APP_ENV: str = "development"

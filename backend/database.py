@@ -1,12 +1,8 @@
-# backend/database.py
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from backend.config import settings
 
 
-# `pool_pre_ping=True` ensures stale connections from the pool are
-# tested before use — critical for managed cloud databases that
-# silently drop idle connections.
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
