@@ -11,8 +11,13 @@ export const updateTrustStatus = (universityId, status) =>
   api.patch(`/admin/universities/${universityId}/trust?status=${status}`).then(r => r.data);
 
 // Issuers
-export const createIssuer = (email, universityId) =>
-  api.post("/admin/issuers", { email, university_id: universityId }).then(r => r.data);
+export const createIssuer = (email, universityId, issuerName, department = "") =>
+  api.post("/admin/issuers", {
+    email,
+    university_id: universityId,
+    issuer_name: issuerName,
+    department,
+  }).then(r => r.data);
 
 export const resetIssuerPassword = (userId) =>
   api.post(`/admin/issuers/${userId}/reset-password`).then(r => r.data);
@@ -33,3 +38,7 @@ export const adminChangeCertificateStatus = (certId, data) =>
 
 export const adminGetAuditHistory = (universityId, params) =>
   api.get(`/admin/universities/${universityId}/audit-history`, { params }).then(r => r.data);
+
+// Activity
+export const getRecentActivity = () =>
+  api.get("/admin/activity").then(r => r.data);

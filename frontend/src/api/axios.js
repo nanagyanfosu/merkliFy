@@ -3,7 +3,7 @@ import axios from "axios";
 const TOKEN_KEY = "merkliFy_token";
 const ROLE_KEY  = "merkliFy_role";
 
-// ── Storage helpers ───────────────────────────────────────────────────────────
+// ── Storage helpers 
 
 export const saveToken = (token, role) => {
   if (!token || typeof token !== "string" || !token.startsWith("eyJ")) {
@@ -25,8 +25,7 @@ export const clearToken = () => {
 
 export const getToken = () => {
   const t = sessionStorage.getItem(TOKEN_KEY);
-  // Guard: reject null, "undefined", "null" — all falsy-equivalent values
-  // that sessionStorage might hold if saveToken was called with bad data.
+
   if (!t || t === "undefined" || t === "null") return null;
   return t;
 };
@@ -37,7 +36,7 @@ export const getRole = () => {
   return r;
 };
 
-// ── Axios instance ────────────────────────────────────────────────────────────
+// ── Axios instance 
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",

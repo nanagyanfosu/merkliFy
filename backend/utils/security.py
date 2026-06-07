@@ -1,14 +1,24 @@
-# backend/utils/security.py
 from datetime import datetime, timedelta, timezone
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from backend.config import settings
 
+# bcrypt primary + pbkdf2_sha256 fallback handles the passlib/bcrypt
+pwd_context = CryptContext(
+    schemes=["bcrypt", "pbkdf2_sha256"],
+    deprecated="auto",
+)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+BCRYPT_MAX_BYTES = 72
 
 
 def hash_password(plain_password: str) -> str:
+
+    if len(plain_password.encode("utf-8")) > BCRYPT_MAX_BYTES:
+        raise ValueError(
+            f"Password exceeds bcrypt's {BCRYPT_MAX_BYTES}-byte limit. "
+            "Use a shorter password."
+        )
     return pwd_context.hash(plain_password)
 
 
@@ -27,6 +37,8 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 
 def decode_access_token(token: str) -> dict | None:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return jwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
+        )
     except JWTError:
         return None
