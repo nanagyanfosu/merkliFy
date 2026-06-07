@@ -1,4 +1,3 @@
-# backend/models/status.py
 import enum
 from datetime import datetime
 from sqlalchemy import String, Text, DateTime, Enum as SAEnum, ForeignKey, func
@@ -13,7 +12,6 @@ class CertificateLifecycleStatus(str, enum.Enum):
 
 
 class CertificateStatus(Base):
-    """Latest status only. One row per certificate."""
     __tablename__ = "certificate_status"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
@@ -33,7 +31,7 @@ class CertificateStatus(Base):
 
 
 class CertificateStatusHistory(Base):
-    """Full audit trail of every status change."""
+    # Full audit trail of every status change.
     __tablename__ = "certificate_status_history"
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)

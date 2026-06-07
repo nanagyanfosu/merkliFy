@@ -1,4 +1,3 @@
-# backend/models/verification_log.py
 from datetime import datetime
 from sqlalchemy import String, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column

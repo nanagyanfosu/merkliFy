@@ -1,4 +1,3 @@
-# backend/models/merkle.py
 from datetime import datetime
 from sqlalchemy import Integer, JSON, ForeignKey, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -13,11 +12,9 @@ class MerkleProof(Base):
         ForeignKey("certificate_records.id"), nullable=False, unique=True
     )
 
-    # Stored as JSON: list of {"hash": "...", "direction": "left"|"right"}
-    # This is the sibling path from leaf to root.
+    # sibling path from leaf to root.
     proof_path: Mapped[list] = mapped_column(JSON, nullable=False)
 
-    # Position of this certificate's leaf in the original sorted list
     leaf_index: Mapped[int] = mapped_column(Integer, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

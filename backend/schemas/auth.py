@@ -1,4 +1,3 @@
-# backend/schemas/auth.py
 from pydantic import BaseModel, EmailStr
 
 
@@ -8,11 +7,23 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    role: str
+    access_token:     str
+    token_type:       str = "bearer"
+    role:             str
     is_temp_password: bool
+    model_config = {"use_enum_values": True}
 
 
 class ChangePasswordRequest(BaseModel):
+    """Used by the Settings security tab. Always requires current password."""
+    current_password: str
+    new_password:     str
+
+
+class SetupPasswordRequest(BaseModel):
+    """
+    Used only on first login when is_temp_password is True.
+    Does not require current_password — the user just proved they
+    know the temp password by authenticating successfully.
+    """
     new_password: str

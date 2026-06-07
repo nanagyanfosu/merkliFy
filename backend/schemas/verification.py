@@ -1,25 +1,14 @@
-# backend/schemas/verification.py
 from pydantic import BaseModel, field_validator
 from typing import Optional
 from enum import Enum
 
 
 class VerificationRequest(BaseModel):
-    """
-    All five canonical fields are required for verification.
-
-    These are the exact same five fields that were normalised and hashed
-    during certificate issuance. The verifier is effectively reconstructing
-    the certificate's cryptographic identity from scratch.
-
-    Normalisation (lowercase + strip) is applied here so the verifier
-    does not need to worry about capitalisation matching the stored record.
-    """
-    serial_number: str
-    fullname: str
-    program: str
+    serial_number:   str
+    fullname:        str
+    program:         str
     graduation_year: int
-    issuer: str
+    issuer:          str
 
     @field_validator("serial_number", "fullname", "program", "issuer")
     @classmethod
@@ -38,32 +27,45 @@ class VerificationRequest(BaseModel):
 
 
 class VerificationResult(str, Enum):
-    AUTHENTIC        = "AUTHENTIC"
-    FAILED           = "FAILED"
-    TAMPERED         = "TAMPERED"
-    BATCH_TAMPER     = "BATCH_TAMPER_DETECTED"
-    UNTRUSTED_ISSUER = "UNTRUSTED_ISSUER"
-    REVOKED          = "REVOKED"
-    SUSPENDED        = "SUSPENDED"
+    """
+    NOT_VERIFIED covers all cases where the certificate cannot be confirmed:
+      - Serial number does not exist
+      - Serial exists but fields don't match (user error)
+      - Serial exists but stored data has been tampered (security event)
+    The distinction is recorded internally in verification_logs but never
+    exposed to the caller.
+
+    CANNOT_VERIFY covers batch-level integrity failures and untrusted issuer:
+      - Merkle Root reconstruction fails
+      - RSA signature invalid
+    Again, the specific reason is logged internally only.
+    """
+    AUTHENTIC      = "AUTHENTIC"
+    NOT_VERIFIED   = "NOT_VERIFIED"    
+    REVOKED        = "REVOKED"
+    SUSPENDED      = "SUSPENDED"
+    CANNOT_VERIFY  = "CANNOT_VERIFY"   
+
+
+class InternalVerificationCode(str, Enum):
+    """
+    Detailed codes stored in verification_logs for admin visibility.
+    Never returned in the API response.
+    """
+    AUTHENTIC               = "AUTHENTIC"
+    NOT_FOUND               = "NOT_FOUND"           # serial doesn't exist at all
+    INPUT_MISMATCH          = "INPUT_MISMATCH"       # serial found, hash wrong, data intact
+    DATA_TAMPERED           = "DATA_TAMPERED"        # serial found, stored data corrupted
+    BATCH_TAMPER_DETECTED   = "BATCH_TAMPER_DETECTED"
+    UNTRUSTED_ISSUER        = "UNTRUSTED_ISSUER"
+    REVOKED                 = "REVOKED"
+    SUSPENDED               = "SUSPENDED"
 
 
 class VerificationResponse(BaseModel):
-    """
-    Returned to the verifier.
-
-    Public fields are only populated when the result is not FAILED or TAMPERED.
-    This ensures failed lookups reveal nothing about what is or isn't
-    in the database.
-    """
-    result: VerificationResult
-    message: str
-
-    # Populated on AUTHENTIC, REVOKED, SUSPENDED
-    serial_number: Optional[str] = None
-    program: Optional[str] = None
-    issuer: Optional[str] = None
+    result:          VerificationResult
+    message:         str
+    serial_number:   Optional[str] = None
+    program:         Optional[str] = None
+    issuer:          Optional[str] = None
     graduation_year: Optional[int] = None
-
-    # Populated on AUTHENTIC only
-    merkle_root: Optional[str] = None
-    batch_id: Optional[int] = None

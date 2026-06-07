@@ -1,70 +1,71 @@
 # backend/schemas/status.py
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
+from enum import Enum
 from backend.models.status import CertificateLifecycleStatus
 
 
-class StatusChangeRequest(BaseModel):
-    """
-    Sent by an issuer or admin to change a certificate's lifecycle status.
+class CertificateSearchRequest(BaseModel):
 
-    new_status must be a valid CertificateLifecycleStatus value.
-    reason is optional but strongly recommended for audit trail quality —
-    the frontend should encourage (but not force) issuers to provide one.
-    """
+    serial_number:   Optional[str] = None
+    fullname:        Optional[str] = None
+    program:         Optional[str] = None
+    graduation_year: Optional[int] = None
+    status:          Optional[str] = None       # ACTIVE / REVOKED / SUSPENDED
+    academic_year:   Optional[int] = None
+    exact_match:     bool          = False
+    sort_by:         str           = "serial_number"
+    sort_dir:        str           = "asc"
+
+    @field_validator("sort_by")
+    @classmethod
+    def validate_sort_by(cls, v):
+        allowed = {"serial_number", "fullname", "program",
+                   "graduation_year", "created_at"}
+        if v not in allowed:
+            return "serial_number"
+        return v
+
+    @field_validator("sort_dir")
+    @classmethod
+    def validate_sort_dir(cls, v):
+        return "desc" if v.lower() == "desc" else "asc"
+
+
+class StatusChangeRequest(BaseModel):
     new_status: CertificateLifecycleStatus
-    reason: Optional[str] = None
+    reason:     Optional[str] = None
 
 
 class StatusChangeResponse(BaseModel):
-    """
-    Returned after a successful status change.
-    """
-    certificate_id: int
-    serial_number: str
-    fullname: str
-    old_status: CertificateLifecycleStatus
-    new_status: CertificateLifecycleStatus
-    changed_by_email: str
-    reason: Optional[str]
-    message: str
+    certificate_id:    int
+    serial_number:     str
+    fullname:          str
+    old_status:        CertificateLifecycleStatus
+    new_status:        CertificateLifecycleStatus
+    changed_by_email:  str
+    reason:            Optional[str]
+    message:           str
 
 
 class StatusHistoryEntry(BaseModel):
-    """One entry in the audit trail for a certificate."""
-    id: int
-    old_status: str
-    new_status: str
+    id:               int
+    old_status:       str
+    new_status:       str
     changed_by_email: str
-    reason: Optional[str]
-    changed_at: str
-
+    reason:           Optional[str]
+    changed_at:       str
     model_config = {"from_attributes": True}
 
 
 class CertificateStatusResponse(BaseModel):
-    """
-    Full status view for a certificate — used on the issuer dashboard
-    when an issuer searches for a specific certificate to manage.
-    """
-    certificate_id: int
-    serial_number: str
-    fullname: str
-    program: str
+    certificate_id:  int
+    serial_number:   str
+    fullname:        str
+    program:         str
     graduation_year: int
-    issuer: str
-    current_status: CertificateLifecycleStatus
-    batch_id: int
-    batch_name: str
-    history: list[StatusHistoryEntry]
-
-
-class CertificateSearchRequest(BaseModel):
-    """
-    Search parameters for certificate lookup on the dashboard.
-    At least one field must be provided.
-    """
-    serial_number: Optional[str] = None
-    fullname: Optional[str] = None
-    program: Optional[str] = None
-    graduation_year: Optional[int] = None
+    issuer:          str
+    current_status:  CertificateLifecycleStatus
+    batch_id:        int
+    batch_name:      str
+    history:         list[StatusHistoryEntry]
