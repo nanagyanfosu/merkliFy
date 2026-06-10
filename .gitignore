@@ -7,6 +7,10 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 .Python
 build/
 develop-eggs/
@@ -149,6 +153,11 @@ activemq-data/
 
 # Environments
 .env
+.env.local
+.env.*.local
+.env.development
+.env.production
+*.env
 .envrc
 .venv
 env/
@@ -216,3 +225,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+
+# Database
+*.sqlite
+*.db
+
+# Secrets
+*.pem
+*.key
