@@ -41,7 +41,7 @@ export default function VerificationLogsPage() {
     <div>
       <h1 className="text-2xl font-bold text-slate-800 mb-1">Verification Logs</h1>
       <p className="text-slate-500 text-sm mb-6">
-        Every public verification attempt — including failed and tampered results.
+        Every public verification attempt is recorded here. Use the filters to find specific records.
       </p>
 
       {/* Filters */}

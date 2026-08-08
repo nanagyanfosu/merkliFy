@@ -4,9 +4,19 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.schemas.verification import VerificationRequest, VerificationResponse
 from backend.services.verification_service import verify_certificate
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
 
 router = APIRouter(prefix="/verify", tags=["verification"])
 
+limiter = Limiter(key_func=get_remote_address)
+@router.post("")
+@limiter.limit("10/minute")
+def verify(request: Request, payload: VerificationRequest,
+           db: Session = Depends(get_db)):
+    ip_address = _get_client_ip(request)
+    return verify_certificate(db, payload, ip_address)
 
 @router.get("/institutions")
 def list_trusted_institutions(db: Session = Depends(get_db)):

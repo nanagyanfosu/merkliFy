@@ -267,124 +267,145 @@ def search_certificates(
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """
-    Searches certificate records with flexible filters and pagination.
-    """
-
-    # Require at least one search field to prevent unscoped full-table dumps
-    has_filter = any([
-        search.serial_number,
-        search.fullname,
-        search.program,
-        search.graduation_year,
-        search.status,
-        search.academic_year,
-    ])
-    if not has_filter:
-        raise HTTPException(
-            status_code=400,
-            detail="At least one search field is required.",
-        )
-
-    # Base query — always join batch for university scoping and year filter
     query = (
         db.query(CertificateRecord)
-        .join(CertificateBatch, CertificateRecord.batch_id == CertificateBatch.id)
+        .join(CertificateBatch,
+              CertificateRecord.batch_id == CertificateBatch.id)
     )
 
-    # Scope issuers to their own university — admins see everything
+    # Issuers see ALL certificates from their university —
+    # not just their own uploads. Data ownership is institutional.
     if requesting_user.role == UserRole.ISSUER:
         if not requesting_user.university_id:
-            raise HTTPException(status_code=403, detail="Account not linked to a university.")
+            raise HTTPException(
+                status_code=403,
+                detail="Account not linked to a university."
+            )
         query = query.filter(
             CertificateBatch.university_id == requesting_user.university_id
         )
 
-    # ── Text filters ──────────────────────────────────────────────────────────
-    if search.serial_number:
-        # Serial number: always exact case-insensitive (it is an identifier)
-        query = query.filter(
-            CertificateRecord.serial_number.ilike(search.serial_number.strip().lower())
-        )
-
-    if search.fullname:
-        val = search.fullname.strip().lower()
-        if search.exact_match:
-            query = query.filter(CertificateRecord.fullname.ilike(val))
-        else:
-            query = query.filter(CertificateRecord.fullname.ilike(f"%{val}%"))
-
-    if search.program:
-        val = search.program.strip().lower()
-        if search.exact_match:
-            # Exact match: the full program string must match exactly
-            query = query.filter(CertificateRecord.program.ilike(val))
-        else:
-            # Contains: useful for discovery but can return broad results.
-            # UI should warn the user when result count is high.
-            query = query.filter(CertificateRecord.program.ilike(f"%{val}%"))
-
-    if search.graduation_year:
-        query = query.filter(
-            CertificateRecord.graduation_year == search.graduation_year
-        )
-
-    # ── Academic year (via batch) ─────────────────────────────────────────────
-    if search.academic_year:
-        query = query.filter(
-            CertificateBatch.academic_year == search.academic_year
-        )
-
-    # ── Status filter (via certificate_status join) ───────────────────────────
-    if search.status:
-        try:
-            status_enum = CertificateLifecycleStatus(search.status.upper())
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid status '{search.status}'. Use ACTIVE, REVOKED, or SUSPENDED.",
+    # Default sort for admins: by issuer/university
+    # Default sort for issuers: by department (uploaded_by)
+    if not search.serial_number and not search.fullname and \
+       not search.program and not search.graduation_year and \
+       not search.status and not search.academic_year:
+        # No filters — load all with sensible default sort
+        if requesting_user.role == UserRole.ISSUER:
+            query = query.order_by(
+                CertificateBatch.uploaded_by.asc(),
+                CertificateRecord.serial_number.asc()
             )
-        query = (
-            query
-            .join(CertificateStatus,
-                  CertificateRecord.id == CertificateStatus.certificate_id)
-            .filter(CertificateStatus.current_status == status_enum)
-        )
+        else:
+            query = query.order_by(
+                CertificateRecord.issuer.asc(),
+                CertificateRecord.serial_number.asc()
+            )
+    else:
+        # Apply search filters
+        if search.serial_number:
+            query = query.filter(
+                CertificateRecord.serial_number.ilike(
+                    search.serial_number.strip().lower()
+                )
+            )
+        if search.fullname:
+            val = search.fullname.strip().lower()
+            if search.exact_match:
+                query = query.filter(CertificateRecord.fullname.ilike(val))
+            else:
+                query = query.filter(
+                    CertificateRecord.fullname.ilike(f"%{val}%")
+                )
+        if search.program:
+            val = search.program.strip().lower()
+            if search.exact_match:
+                query = query.filter(CertificateRecord.program.ilike(val))
+            else:
+                query = query.filter(
+                    CertificateRecord.program.ilike(f"%{val}%")
+                )
+        if search.graduation_year:
+            query = query.filter(
+                CertificateRecord.graduation_year == search.graduation_year
+            )
+        if search.academic_year:
+            query = query.filter(
+                CertificateBatch.academic_year == search.academic_year
+            )
+        if search.status:
+            try:
+                status_enum = CertificateLifecycleStatus(
+                    search.status.upper()
+                )
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid status '{search.status}'."
+                )
+            query = query.join(
+                CertificateStatus,
+                CertificateRecord.id == CertificateStatus.certificate_id
+            ).filter(CertificateStatus.current_status == status_enum)
 
-    # ── Sorting ───────────────────────────────────────────────────────────────
-    sort_col = getattr(CertificateRecord, search.sort_by, CertificateRecord.serial_number)
-    query = query.order_by(
-        sort_col.desc() if search.sort_dir == "desc" else sort_col.asc()
-    )
+        sort_col = getattr(
+            CertificateRecord,
+            search.sort_by,
+            CertificateRecord.serial_number
+        )
+        query = query.order_by(
+            sort_col.desc() if search.sort_dir == "desc"
+            else sort_col.asc()
+        )
 
     total = query.count()
     records = query.offset(offset).limit(min(limit, 200)).all()
 
-    # Enrich with current status (avoid N+1 by batch loading)
     cert_ids = [r.id for r in records]
     status_map = {
         s.certificate_id: s.current_status
-        for s in db.query(CertificateStatus)
-        .filter(CertificateStatus.certificate_id.in_(cert_ids))
-        .all()
+        for s in db.query(CertificateStatus).filter(
+            CertificateStatus.certificate_id.in_(cert_ids)
+        ).all()
     }
 
-    results = [
-        {
+    # For issuers: fetch uploader names to show department context
+    uploader_map = {}
+    if requesting_user.role == UserRole.ISSUER:
+        batch_ids = list({r.batch_id for r in records})
+        batches = db.query(CertificateBatch).filter(
+            CertificateBatch.id.in_(batch_ids)
+        ).all()
+        uploader_ids = list({b.uploaded_by for b in batches if b.uploaded_by})
+        uploaders = db.query(User).filter(User.id.in_(uploader_ids)).all()
+        uploader_name_map = {
+            u.id: (u.department or u.issuer_name or u.email)
+            for u in uploaders
+        }
+        uploader_map = {
+            b.id: uploader_name_map.get(b.uploaded_by, "Unknown")
+            for b in batches
+        }
+
+    results = []
+    for r in records:
+        item = {
             "certificate_id":  r.id,
             "serial_number":   r.serial_number,
             "fullname":        r.fullname,
             "program":         r.program,
             "graduation_year": r.graduation_year,
             "issuer":          r.issuer,
-            "current_status":  status_map.get(r.id, CertificateLifecycleStatus.ACTIVE).value,
+            "current_status":  status_map.get(
+                r.id, CertificateLifecycleStatus.ACTIVE
+            ).value,
             "batch_id":        r.batch_id,
             "academic_year":   r.batch.academic_year if r.batch else None,
         }
-        for r in records
-    ]
+        if requesting_user.role == UserRole.ISSUER:
+            item["uploaded_by_dept"] = uploader_map.get(r.batch_id, "—")
+        results.append(item)
 
-    # Warn when contains search returns a very broad result set
     broad_warning = (
         not search.exact_match
         and total > 50
