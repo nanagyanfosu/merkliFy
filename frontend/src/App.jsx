@@ -1,4 +1,3 @@
-// src/App.jsx
 import { Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./guards/ProtectedRoute";
 import RoleGuard from "./guards/RoleGuard";
@@ -6,6 +5,8 @@ import RoleGuard from "./guards/RoleGuard";
 // Public
 import PublicLayout from "./components/layout/PublicLayout";
 import VerifyPage from "./pages/public/VerifyPage";
+import LandingPage from "./pages/public/LandingPage";
+
 
 // Auth — portal-specific login pages
 import AdminLoginPage from "./pages/auth/AdminLoginPage";
@@ -38,9 +39,9 @@ export default function App() {
 
       {/* PUBLIC */}
       <Route element={<PublicLayout />}>
-        <Route path="/" element={<VerifyPage />} />
+        <Route path="/"       element={<LandingPage />} />
+        <Route path="/verify" element={<VerifyPage />}  />
       </Route>
-
 
       {/* ADMIN PORTAL */}
       <Route path="/admin/login" element={<AdminLoginPage />} />
