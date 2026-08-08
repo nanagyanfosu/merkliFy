@@ -56,7 +56,7 @@ const handleSubmit = async (e) => {
             <ShieldCheck className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h1 className="text-white font-bold text-xl">CACVS</h1>
+            <h1 className="text-white font-bold text-xl">merkliFy</h1>
             <p className="text-brand-200 text-xs">Administrator Portal</p>
           </div>
         </div>

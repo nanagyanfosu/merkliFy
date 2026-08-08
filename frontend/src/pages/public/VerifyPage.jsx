@@ -114,23 +114,6 @@ export default function VerifyPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Simple header for standalone verify page */}
-      {/* <header className="bg-white border-b border-slate-100">
-        <div className="max-w-2xl mx-auto px-6 h-14 flex items-center
-                         justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-teal-500" />
-            <span className="font-bold text-slate-900 text-sm">
-              MerkliFy
-            </span>
-          </div>
-          <a href="/"
-            className="text-sm text-slate-400 hover:text-slate-600
-                        transition-colors">
-            ← Back
-          </a>
-        </div>
-      </header> */}
 
       <div className="max-w-2xl mx-auto px-6 py-12">
         <div className="mb-8">

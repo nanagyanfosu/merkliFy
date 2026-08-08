@@ -85,7 +85,7 @@ export default function AdminCertificatesPage() {
     <div>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-slate-800">Certificates</h1>
-        <p className="text-slate-500 text-sm">Search and manage across all universities</p>
+        <p className="text-slate-500 text-sm">Search and manage certificates across all universities</p>
       </div>
 
       {/* Search panel */}

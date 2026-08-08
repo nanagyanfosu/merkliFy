@@ -3,6 +3,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.routers import auth, admin, issuer, verification, setup
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -14,13 +18,12 @@ app = FastAPI(
 # In development, it defaults to localhost
 allowed_origins_raw = os.getenv(
     "ALLOWED_ORIGINS",
-    "https://merklify.vercel.app/, http://localhost:5174"
+    "https://merklify.vercel.app, http://localhost:5173"
 )
 allowed_origins = [o.strip() for o in allowed_origins_raw.split(",")]
 
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["http://localhost:5174"],
     allow_origins=allowed_origins,     
     allow_credentials=True,
     allow_methods=["*"],
@@ -32,6 +35,10 @@ app.include_router(admin.router)
 app.include_router(issuer.router)
 app.include_router(verification.router)
 app.include_router(setup.router)
+
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.get("/health")
 def health():

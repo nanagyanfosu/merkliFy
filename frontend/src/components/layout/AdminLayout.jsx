@@ -91,16 +91,17 @@ export default function AdminLayout() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile top bar */}
         <div className="lg:hidden flex items-center gap-3 px-4 h-14
-                         bg-slate-900 border-b border-slate-700">
-          <button onClick={() => setSidebarOpen(true)}
-            className="text-slate-400 hover:text-white">
-            <Menu className="w-6 h-6" />
-          </button>
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-sky-400" />
-            <span className="text-sky-300 font-semibold text-sm">Admin Portal</span>
-          </div>
-        </div>
+                 bg-slate-900 border-b border-slate-700">
+  <button onClick={() => setSidebarOpen(true)}
+    className="text-slate-400 hover:text-white">
+    <Menu className="w-6 h-6" />
+  </button>
+  {/* MerkliFy brand, not portal name */}
+  <div className="flex items-center gap-2">
+    <ShieldCheck className="w-4 h-4 text-sky-400" />
+    <span className="text-white font-bold text-sm">MerkliFy</span>
+  </div>
+</div>
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <Outlet />

@@ -30,6 +30,122 @@ from backend.models.university import University
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+@router.get("/dashboard-summary")
+def get_dashboard_summary(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Full dashboard summary for the admin home screen.
+    Includes universities, issuers, recent activity, and anomalies.
+    """
+    from backend.models.university import University, TrustStatus
+    from backend.models.batch import CertificateBatch
+    from backend.models.certificate import CertificateRecord
+    from backend.models.verification_log import VerificationLog
+    from backend.models.status import CertificateStatusHistory
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    last_7_days = now - timedelta(days=7)
+    last_24h    = now - timedelta(hours=24)
+
+    # University counts
+    all_unis      = db.query(University).all()
+    trusted_unis  = [u for u in all_unis if u.trust_status == TrustStatus.TRUSTED]
+    pending_unis  = [u for u in all_unis if u.trust_status == TrustStatus.PENDING]
+
+    # Issuer accounts
+    all_issuers = db.query(User).filter(User.role == UserRole.ISSUER).all()
+    pending_issuers_raw = [u for u in all_issuers if u.is_temp_password]
+
+    # For pending issuers — find who created them (via status history is
+    # not applicable here; we use created_at ordering as a proxy.
+    # Better: add a created_by FK to users — for now return email + created_at)
+    uni_map = {u.id: u.university_name for u in all_unis}
+    admin_accounts = db.query(User).filter(
+        User.role == UserRole.ADMIN
+    ).all()
+    # We'll show the admin who most recently created an account
+    # as a simplification until created_by is added
+    admin_email = admin_accounts[0].email if admin_accounts else "system"
+
+    pending_issuers = [
+        {
+            "id":              u.id,
+            "email":           u.email,
+            "issuer_name":     u.issuer_name,
+            "department":      u.department,
+            "department_code": u.department_code,
+            "university_name": uni_map.get(u.university_id, "Unknown"),
+            "created_at":      u.created_at.isoformat(),
+            "created_by":      admin_email,
+        }
+        for u in pending_issuers_raw
+    ]
+
+    # Batches last 7 days
+    recent_batches = db.query(CertificateBatch).filter(
+        CertificateBatch.created_at >= last_7_days
+    ).count()
+
+    # Verifications today vs yesterday
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday_start = today_start - timedelta(days=1)
+
+    verifications_today = db.query(VerificationLog).filter(
+        VerificationLog.timestamp >= today_start
+    ).count()
+    verifications_yesterday = db.query(VerificationLog).filter(
+        VerificationLog.timestamp >= yesterday_start,
+        VerificationLog.timestamp < today_start,
+    ).count()
+
+    # Anomalies last 24h
+    anomaly_types = [
+        "TAMPERED", "DATA_TAMPERED",
+        "BATCH_TAMPER_DETECTED", "UNTRUSTED_ISSUER"
+    ]
+    recent_anomalies = db.query(VerificationLog).filter(
+        VerificationLog.timestamp >= last_24h,
+        VerificationLog.verification_result.in_(anomaly_types),
+    ).count()
+
+    # Recent status changes
+    recent_changes = db.query(CertificateStatusHistory).filter(
+        CertificateStatusHistory.changed_at >= last_7_days
+    ).count()
+
+    return {
+        "universities": {
+            "total":   len(all_unis),
+            "trusted": len(trusted_unis),
+            "pending": len(pending_unis),
+            "pending_list": [
+                {
+                    "id":              u.id,
+                    "university_code": u.university_code,
+                    "university_name": u.university_name,
+                    "location":        u.location,
+                    "registered_on":   u.created_at.isoformat(),
+                }
+                for u in pending_unis
+            ],
+        },
+        "issuers": {
+            "total":         len(all_issuers),
+            "pending_login": len(pending_issuers_raw),
+            "pending_list":  pending_issuers,
+        },
+        "activity": {
+            "batches_last_7_days":       recent_batches,
+            "verifications_today":       verifications_today,
+            "verifications_yesterday":   verifications_yesterday,
+            "anomalies_last_24h":        recent_anomalies,
+            "status_changes_last_7_days": recent_changes,
+        },
+    }
+
 #  Universities 
 
 @router.post("/universities", response_model=RegisterUniversityResponse)
@@ -306,4 +422,77 @@ def get_recent_activity(
         "anomalies":         anomalies,
         "pending_approvals": pending_approvals,
         "pending_issuers":   pending_issuers,
+    }
+
+
+@router.get(
+    "/issuers/{user_id}",
+    summary="Get full detail for a single issuer account",
+)
+def get_issuer_detail(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Returns full profile for a single issuer including upload stats."""
+    from backend.models.batch import CertificateBatch
+    from backend.models.certificate import CertificateRecord
+    from backend.models.university import University
+
+    issuer = db.query(User).filter(
+        User.id == user_id,
+        User.role == UserRole.ISSUER,
+    ).first()
+
+    if not issuer:
+        raise HTTPException(status_code=404, detail="Issuer not found.")
+
+    uni = None
+    if issuer.university_id:
+        uni = db.query(University).filter(
+            University.id == issuer.university_id
+        ).first()
+
+    # Upload stats scoped to this issuer's own uploads
+    total_batches = db.query(CertificateBatch).filter(
+        CertificateBatch.uploaded_by == issuer.id
+    ).count()
+
+    total_certs = db.query(CertificateRecord).join(
+        CertificateBatch,
+        CertificateRecord.batch_id == CertificateBatch.id
+    ).filter(
+        CertificateBatch.uploaded_by == issuer.id
+    ).count()
+
+    # Most recent batch
+    last_batch = db.query(CertificateBatch).filter(
+        CertificateBatch.uploaded_by == issuer.id
+    ).order_by(CertificateBatch.created_at.desc()).first()
+
+    return {
+        "id":               issuer.id,
+        "email":            issuer.email,
+        "issuer_name":      issuer.issuer_name,
+        "department":       issuer.department,
+        "department_code":  issuer.department_code,
+        "is_temp_password": issuer.is_temp_password,
+        "last_login":       issuer.last_login.isoformat()
+                            if issuer.last_login else None,
+        "created_at":       issuer.created_at.isoformat(),
+        "university": {
+            "id":              uni.id            if uni else None,
+            "university_name": uni.university_name if uni else None,
+            "university_code": uni.university_code if uni else None,
+            "location":        uni.location       if uni else None,
+            "trust_status":    uni.trust_status   if uni else None,
+        } if uni else None,
+        "stats": {
+            "total_batches":    total_batches,
+            "total_certs":      total_certs,
+            "last_batch_name":  last_batch.batch_name
+                                if last_batch else None,
+            "last_batch_date":  last_batch.created_at.isoformat()
+                                if last_batch else None,
+        },
     }

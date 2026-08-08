@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import { getMe } from "../../api/auth";
 import {
   GraduationCap, LayoutDashboard, Upload, FolderOpen,
-  Search, Settings, LogOut, Menu, X,
+  Search, Settings, LogOut, Menu, X, ShieldCheck
 } from "lucide-react";
 
 const NAV = [
@@ -118,18 +118,17 @@ export default function IssuerLayout() {
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Mobile top bar with hamburger */}
-        <div className="lg:hidden flex items-center gap-3 px-4 h-14 bg-teal-900 border-b border-teal-800">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="text-teal-200 hover:text-white"
-          >
-            <Menu className="w-6 h-6" />
-          </button>
-          <span className="text-teal-200 font-semibold text-sm truncate">
-            {profile?.university_name || "Issuer Portal"}
-          </span>
-        </div>
-
+        <div className="lg:hidden flex items-center gap-3 px-4 h-14
+                 bg-teal-900 border-b border-teal-800">
+  <button onClick={() => setSidebarOpen(true)}
+    className="text-teal-200 hover:text-white">
+    <Menu className="w-6 h-6" />
+  </button>
+  <div className="flex items-center gap-2">
+    <ShieldCheck className="w-4 h-4 text-teal-300" />
+    <span className="text-white font-bold text-sm">MerkliFy</span>
+  </div>
+</div>
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           <Outlet />
         </main>

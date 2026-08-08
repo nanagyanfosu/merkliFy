@@ -1,5 +1,14 @@
 import api from "./axios";
 
+export const getDashboardSummary = () =>
+  api.get("/admin/dashboard-summary").then(r => r.data);
+
+export const getIssuerDetail = (userId) =>
+  api.get(`/admin/issuers/${userId}`).then(r => r.data);
+
+export const getAllCertificates = (params) =>
+  api.post("/admin/certificates/search", {}, { params }).then(r => r.data);
+
 // Universities
 export const listUniversities = () =>
   api.get("/admin/universities").then(r => r.data);

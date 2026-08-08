@@ -5,44 +5,49 @@ import {
 
 const CONFIG = {
   AUTHENTIC: {
-    icon:       CheckCircle2,
-    bg:         "bg-green-50",
-    border:     "border-green-300",
-    iconColor:  "text-green-500",
-    titleColor: "text-green-800",
-    title:      "Certificate Verified",
+    icon:        CheckCircle2,
+    iconClass:   "text-teal-600",
+    borderClass: "border-teal-200 bg-teal-50/40",
+    labelClass:  "text-teal-700",
+    label:       "Certificate Verified",
+    sub:         "This certificate is authentic and currently active.",
+    showFields:  true,
   },
   NOT_VERIFIED: {
-    icon:       HelpCircle,
-    bg:         "bg-slate-50",
-    border:     "border-slate-200",
-    iconColor:  "text-slate-400",
-    titleColor: "text-slate-700",
-    title:      "Not Verified",
+    icon:        HelpCircle,
+    iconClass:   "text-slate-400",
+    borderClass: "border-slate-200 bg-slate-50",
+    labelClass:  "text-slate-700",
+    label:       "Details Could Not Be Matched",
+    sub:         "Check all five fields are entered exactly as they appear on the certificate and try again.",
+    showFields:  false,
   },
   REVOKED: {
-    icon:       XCircle,
-    bg:         "bg-red-50",
-    border:     "border-red-300",
-    iconColor:  "text-red-500",
-    titleColor: "text-red-800",
-    title:      "Certificate Revoked",
+    icon:        XCircle,
+    iconClass:   "text-red-500",
+    borderClass: "border-red-200 bg-red-50/40",
+    labelClass:  "text-red-700",
+    label:       "Certificate Revoked",
+    sub:         "This certificate has been formally revoked by the issuing institution. Contact them for further information.",
+    showFields:  true,
   },
   SUSPENDED: {
-    icon:       Clock,
-    bg:         "bg-amber-50",
-    border:     "border-amber-300",
-    iconColor:  "text-amber-500",
-    titleColor: "text-amber-800",
-    title:      "Certificate Suspended",
+    icon:        Clock,
+    iconClass:   "text-amber-500",
+    borderClass: "border-amber-200 bg-amber-50/40",
+    labelClass:  "text-amber-700",
+    label:       "Certificate Suspended",
+    sub:         "This certificate is temporarily suspended. Contact the issuing institution for details.",
+    showFields:  true,
   },
   CANNOT_VERIFY: {
-    icon:       AlertCircle,
-    bg:         "bg-orange-50",
-    border:     "border-orange-300",
-    iconColor:  "text-orange-500",
-    titleColor: "text-orange-800",
-    title:      "Verification Unavailable",
+    icon:        AlertCircle,
+    iconClass:   "text-orange-500",
+    borderClass: "border-orange-200 bg-orange-50/40",
+    labelClass:  "text-orange-700",
+    label:       "Verification Unavailable",
+    sub:         "A system integrity issue was detected. Contact the issuing institution directly.",
+    showFields:  false,
   },
 };
 
@@ -51,36 +56,46 @@ export default function ResultCard({ result }) {
   const Icon = cfg.icon;
 
   return (
-    <div className={`rounded-xl border-2 p-6 ${cfg.bg} ${cfg.border}`}>
-      <div className="flex items-start gap-4">
-        <Icon className={`w-8 h-8 flex-shrink-0 mt-0.5 ${cfg.iconColor}`} />
+    <div className={`rounded-xl border p-5 ${cfg.borderClass}`}>
+      {/* Header */}
+      <div className="flex items-start gap-3 mb-4">
+        <Icon className={`w-5 h-5 flex-shrink-0 mt-0.5 ${cfg.iconClass}`} />
         <div>
-          <h3 className={`font-bold text-lg ${cfg.titleColor}`}>{cfg.title}</h3>
-          <p className="text-slate-600 text-sm mt-0.5">{result.message}</p>
+          <p className={`font-semibold text-sm ${cfg.labelClass}`}>
+            {cfg.label}
+          </p>
+          <p className="text-slate-500 text-sm mt-0.5 leading-relaxed">
+            {cfg.sub}
+          </p>
         </div>
       </div>
 
-      {/* Certificate details — only shown when result is positive or administrative */}
-      {result.serial_number && (
-        <div className="mt-5 pt-5 border-t border-black/10
-                         grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Serial Number"   value={result.serial_number} />
+      {/* Certificate fields — shown only when relevant */}
+      {cfg.showFields && result.serial_number && (
+        <div className="border-t border-black/8 pt-4
+                         grid grid-cols-2 gap-x-6 gap-y-3">
+          <Field label="Serial Number"   value={result.serial_number} mono />
+          <Field label="Graduation Year" value={result.graduation_year} mono />
           <Field label="Program"         value={result.program} />
           <Field label="Issuing Body"    value={result.issuer} />
-          <Field label="Graduation Year" value={result.graduation_year} />
         </div>
       )}
     </div>
   );
 }
 
-function Field({ label, value }) {
+function Field({ label, value, mono = false }) {
   return (
     <div>
-      <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">
+      <p className="text-xs font-semibold text-slate-400 uppercase
+                     tracking-wide mb-0.5">
         {label}
       </p>
-      <p className="text-sm font-medium text-slate-800 mt-0.5">{value}</p>
+      <p className={`text-sm text-slate-800 font-medium ${
+        mono ? "font-mono" : ""
+      }`}>
+        {value}
+      </p>
     </div>
   );
 }
