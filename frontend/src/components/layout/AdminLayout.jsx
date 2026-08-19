@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import {
   ShieldCheck, LayoutDashboard, University, Users,
-  ScrollText, Search, Settings, LogOut, Menu, X,
+  ScrollText, Search, Settings, LogOut, Menu, X, HelpCircle
 } from "lucide-react";
 
 const NAV = [
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/admin/certificates", label: "Certificates",      icon: Search },
   { to: "/admin/logs",         label: "Verification Logs", icon: ScrollText },
   { to: "/admin/settings",     label: "Settings",          icon: Settings },
+  { to: "/admin/help", label: "Help", icon: HelpCircle }
 ];
 
 export default function AdminLayout() {

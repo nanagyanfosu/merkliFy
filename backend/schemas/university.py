@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from backend.models.university import TrustStatus
+from pydantic import BaseModel, EmailStr
+from backend.models.university import TrustStatus, InstitutionType
 from datetime import datetime
 from typing import Optional
 
@@ -38,3 +38,21 @@ class TrustStatusUpdateResponse(BaseModel):
     university_id: int
     new_status:    TrustStatus
     message:       str
+
+
+class PublicRegistrationRequest(BaseModel):
+    university_name:    str
+    institution_type:   InstitutionType
+    location:           str
+    official_email:     EmailStr
+    phone:              Optional[str] = None
+    website_url:        Optional[str] = None
+    domain:             str
+    year_established:   Optional[int] = None
+    student_population: Optional[int] = None
+    contact_name:       str
+    contact_role:       str
+    notes:              Optional[str] = None
+
+    class Config:
+        use_enum_values = False

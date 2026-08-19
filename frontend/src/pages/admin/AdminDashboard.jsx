@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { getDashboardSummary } from "../../api/admin";
+import { getDashboardSummary, getPendingRegistrations,
+         approvePendingRegistration, rejectPendingRegistration }
+  from "../../api/admin";
 import { Link } from "react-router-dom";
 import {
   University, ShieldCheck, Users, AlertTriangle,
   Clock, FileUp, TrendingUp, ChevronRight,
-  ArrowUpRight, ArrowDownRight,
+  ArrowUpRight, ArrowDownRight, Globe
 } from "lucide-react";
 
 export default function AdminDashboard() {
@@ -24,8 +26,13 @@ export default function AdminDashboard() {
   }
 
   const { universities, issuers, activity } = data || {};
-  const verifyDelta = (activity?.verifications_today || 0) -
-                      (activity?.verifications_yesterday || 0);
+  const verifyDelta  = (activity?.verifications_today || 0) -
+                     (activity?.verifications_yesterday || 0);
+  const authenticRate = activity?.verifications_today > 0
+  ? Math.round(
+      ((activity?.authentic_today || 0) / activity.verifications_today) * 100
+    )
+  : null;
 
   return (
     <div>
@@ -38,44 +45,46 @@ export default function AdminDashboard() {
 
       {/* Top stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard
-          icon={University}
-          color="blue"
-          label="Universities"
-          value={universities?.total || 0}
-          sub={`${universities?.trusted || 0} trusted`}
-        />
-        <StatCard
-          icon={ShieldCheck}
-          color="green"
-          label="Trusted"
-          value={universities?.trusted || 0}
-          sub={universities?.pending
-            ? `${universities.pending} pending approval`
-            : "none pending"}
-          subAlert={universities?.pending > 0}
-        />
-        <StatCard
-          icon={Users}
-          color="teal"
-          label="Issuer Accounts"
-          value={issuers?.total || 0}
-          sub={issuers?.pending_login
-            ? `${issuers.pending_login} awaiting first login`
-            : "all active"}
-          subAlert={issuers?.pending_login > 0}
-        />
-        <StatCard
-          icon={TrendingUp}
-          color="indigo"
-          label="Verifications Today"
-          value={activity?.verifications_today || 0}
-          sub={verifyDelta >= 0
-            ? `+${verifyDelta} vs yesterday`
-            : `${verifyDelta} vs yesterday`}
-          trend={verifyDelta >= 0 ? "up" : "down"}
-        />
-      </div>
+
+  {/* Card 1: Platform reach */}
+  <StatCard
+    icon={Globe}
+    color="teal"
+    label="Total Verifiable Certificates"
+    value={activity?.total_certificates_system || "—"}
+    sub="across all institutions"
+  />
+
+  {/* Card 2: Verification health */}
+  <StatCard
+    icon={ShieldCheck}
+    color="green"
+    label="Verification Success Rate"
+    value={authenticRate !== null ? `${authenticRate}%` : "—"}
+    sub={`${activity?.verifications_today || 0} checks today`}
+  />
+
+  {/* Card 3: Anomalies */}
+  <StatCard
+    icon={AlertTriangle}
+    color={activity?.anomalies_last_24h > 0 ? "red" : "slate"}
+    label="Anomalies (24h)"
+    value={activity?.anomalies_last_24h ?? 0}
+    sub={activity?.anomalies_last_24h > 0
+      ? "Review verification logs"
+      : "No issues detected"}
+    subAlert={activity?.anomalies_last_24h > 0}
+  />
+
+  {/* Card 4: Recent uploads */}
+  <StatCard
+    icon={FileUp}
+    color="indigo"
+    label="Batches This Week"
+    value={activity?.batches_last_7_days ?? 0}
+    sub={`${activity?.status_changes_last_7_days || 0} status changes`}
+  />
+</div>
 
       {/* Alert strip — anomalies */}
       {activity?.anomalies_last_24h > 0 && (
@@ -229,8 +238,10 @@ function StatCard({ icon: Icon, color, label, value, sub, subAlert, trend }) {
     green:  { bg: "bg-green-50",  icon: "text-green-600" },
     teal:   { bg: "bg-teal-50",   icon: "text-teal-600"  },
     indigo: { bg: "bg-indigo-50", icon: "text-indigo-600" },
+    red:    { bg: "bg-red-50",    icon: "text-red-600"    },
+    slate:  { bg: "bg-slate-50",  icon: "text-slate-500"  },
   };
-  const c = colors[color];
+  const c = colors[color] || { bg: "bg-slate-50", icon: "text-slate-500" };
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
       <div className={`w-9 h-9 ${c.bg} rounded-lg flex items-center
@@ -305,6 +316,91 @@ function ActivityRow({ icon: Icon, label, value, sub, alert }) {
           {value}
         </span>
         <span className="text-xs text-slate-400 ml-1">{sub}</span>
+      </div>
+    </div>
+  );
+}
+
+function PendingRegistrationsCard() {
+  const qc = useQueryClient();
+  const { data: regs = [] } = useQuery({
+    queryKey: ["pending-registrations"],
+    queryFn:  getPendingRegistrations,
+  });
+
+  const approveMut = useMutation({
+    mutationFn: approvePendingRegistration,
+    onSuccess: () => qc.invalidateQueries(["pending-registrations"]),
+  });
+
+  const rejectMut = useMutation({
+    mutationFn: rejectPendingRegistration,
+    onSuccess: () => qc.invalidateQueries(["pending-registrations"]),
+  });
+
+  if (regs.length === 0) return null;
+
+  return (
+    <div className="bg-white border-2 border-amber-200 rounded-xl
+                     overflow-hidden mb-5">
+      <div className="px-5 py-3 bg-amber-50 border-b border-amber-100
+                       flex items-center gap-2">
+        <AlertTriangle className="w-4 h-4 text-amber-600" />
+        <h2 className="font-semibold text-amber-800 text-sm">
+          Institution Requests ({regs.length})
+        </h2>
+      </div>
+      <div className="divide-y divide-slate-50">
+        {regs.map(r => (
+          <div key={r.id} className="px-5 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-800 text-sm">
+                  {r.university_name}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {r.institution_type} · {r.location}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {r.contact_name} ({r.contact_role}) · {r.official_email}
+                </p>
+                {r.website_url && (
+                  <a href={r.website_url} target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-sky-600 hover:underline mt-0.5 block">
+                    {r.website_url}
+                  </a>
+                )}
+                {r.notes && (
+                  <p className="text-xs text-slate-400 italic mt-1">
+                    "{r.notes}"
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                <button
+                  onClick={() => approveMut.mutate(r.id)}
+                  disabled={approveMut.isPending}
+                  className="text-xs font-semibold text-white
+                              bg-teal-600 hover:bg-teal-700
+                              px-3 py-1.5 rounded-lg disabled:opacity-50
+                              transition-colors"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => rejectMut.mutate(r.id)}
+                  disabled={rejectMut.isPending}
+                  className="text-xs font-semibold text-red-600
+                              border border-red-200 hover:bg-red-50
+                              px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

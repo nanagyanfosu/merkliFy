@@ -12,7 +12,7 @@ import {
 export default function UniversitiesPage() {
   const qc = useQueryClient();
   const [showForm, setShowForm] = useState(false);
-  const [expanded, setExpanded] = useState(null);
+  const [detailUni, setDetailUni] = useState(null);
   const [form, setForm] = useState({
     university_name: "", location: "", contact: "", domain: "",
   });
@@ -22,6 +22,7 @@ export default function UniversitiesPage() {
     queryKey: ["admin-universities"],
     queryFn: listUniversities,
   });
+  
 
   const registerMut = useMutation({
     mutationFn: registerUniversity,
@@ -176,10 +177,10 @@ export default function UniversitiesPage() {
 
                   {/* Expand toggle */}
                   <button
-                    onClick={() => setExpanded(expanded === u.id ? null : u.id)}
+                    onClick={() => setDetailUni(detailUni === u.id ? null : u.id)}
                     className="text-slate-400 hover:text-slate-600"
                   >
-                    {expanded === u.id
+                    {detailUni === u.id
                       ? <ChevronUp className="w-4 h-4" />
                       : <ChevronDown className="w-4 h-4" />}
                   </button>
@@ -187,49 +188,80 @@ export default function UniversitiesPage() {
               </div>
 
               {/* Expanded detail */}
-              {expanded === u.id && (
-                <div className="border-t border-slate-100 bg-slate-50 px-5 py-4
-                                 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
-                  <InfoRow icon={Phone}  label="Contact"  value={u.contact} />
-                  <InfoRow icon={Globe}  label="Domain"   value={u.domain} />
-                  <div>
-                    <div className="flex items-center gap-1 text-slate-400 text-xs mb-1.5">
-                      <Mail className="w-3 h-3" />
-                      <span className="font-medium uppercase tracking-wide">
-                        Issuer Accounts
-                      </span>
-                    </div>
-                    {u.issuers?.length ? (
-                      u.issuers.map(iss => (
-                        <p key={iss.id} className="text-slate-700 text-xs py-0.5">
-                          {iss.email}
-                          {iss.is_temp_password && (
-                            <span className="ml-2 text-amber-500 text-xs">(temp password)</span>
+              {detailUni === u.id && (() => {
+                const detailUniData = universities.find(x => x.id === detailUni);
+                if (!detailUniData) return null;
+                return (
+                  <div className="mt-5 bg-white border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="px-6 py-5 grid grid-cols-2 md:grid-cols-3 gap-5 text-sm">
+                      {[
+                        { label: "Location", value: detailUniData.location },
+                        { label: "Official Email", value: detailUniData.official_email || "—" },
+                        { label: "Phone", value: detailUniData.phone || "—" },
+                        { label: "Website", value: detailUniData.website_url || "—", link: true },
+                        { label: "Domain", value: detailUniData.domain },
+                        { label: "Year Established", value: detailUniData.year_established || "—" },
+                        {
+                          label: "Student Population",
+                          value: detailUniData.student_population
+                            ? detailUniData.student_population.toLocaleString()
+                            : "—",
+                        },
+                        { label: "Institution Type", value: detailUniData.institution_type },
+                        { label: "Registered", value: new Date(detailUniData.created_at).toLocaleDateString() },
+                      ].map(({ label, value, link }) => (
+                        <div key={label}>
+                          <p className="text-xs text-slate-400 mb-0.5">{label}</p>
+                          {link && value !== "—" ? (
+                            <a href={value} target="_blank" rel="noopener noreferrer"
+                              className="text-sky-600 hover:underline text-sm font-medium">
+                              {value}
+                            </a>
+                          ) : (
+                            <p className="font-medium text-slate-800">{value}</p>
                           )}
-                        </p>
-                      ))
-                    ) : (
-                      <p className="text-slate-400 text-xs italic">No issuers yet</p>
-                    )}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="px-6 pb-5 border-t border-slate-100 pt-4">
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                        Issuer Accounts ({detailUniData.issuers?.length || 0})
+                      </p>
+                      {detailUniData.issuers?.length > 0 ? (
+                        <div className="space-y-2">
+                          {detailUniData.issuers.map(iss => (
+                            <div key={iss.id}
+                              className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                              <div>
+                                <p className="text-sm font-medium text-slate-800">
+                                  {iss.issuer_name || iss.email}
+                                </p>
+                                <p className="text-xs text-slate-400">
+                                  {iss.email}
+                                  {iss.department ? ` · ${iss.department}` : ""}
+                                  {iss.department_code ? ` · ${iss.department_code}` : ""}
+                                </p>
+                              </div>
+                              {iss.is_temp_password && (
+                                <span className="text-xs text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-full">
+                                  Awaiting first login
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-400">No issuer accounts yet.</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-function InfoRow({ icon: Icon, label, value }) {
-  return (
-    <div>
-      <div className="flex items-center gap-1 text-slate-400 text-xs mb-1">
-        <Icon className="w-3 h-3" />
-        <span className="font-medium uppercase tracking-wide">{label}</span>
-      </div>
-      <p className="text-slate-700">{value}</p>
     </div>
   );
 }

@@ -1,311 +1,246 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "../../api/axios";
 import {
-  adminSearchCertificates, adminGetCertificateStatus,
+  adminGetCertificateStatus,
   adminChangeCertificateStatus,
 } from "../../api/admin";
 import Badge from "../../components/ui/Badge";
 import ConfirmModal from "../../components/ui/ConfirmModal";
-import {
-  Search, Loader2, ChevronRight, SlidersHorizontal,
-  AlertTriangle, ChevronUp, ChevronDown,
-} from "lucide-react";
+import CertificateDetailModal from "../../components/ui/CertificateDetailModal";
+import { Search, Loader2, X, Filter } from "lucide-react";
 
-const STATUSES     = ["", "ACTIVE", "REVOKED", "SUSPENDED"];
-const CURRENT_YEAR = new Date().getFullYear();
-const YEARS        = ["", ...Array.from({ length: 8 }, (_, i) => CURRENT_YEAR - i)];
-
-const SORT_FIELDS = [
-  { value: "serial_number",   label: "Serial Number" },
-  { value: "fullname",        label: "Name" },
-  { value: "program",         label: "Program" },
-  { value: "graduation_year", label: "Year" },
-  { value: "created_at",      label: "Date Added" },
-];
+const STATUSES = ["", "ACTIVE", "REVOKED", "SUSPENDED"];
+const LIMIT    = 50;
 
 export default function AdminCertificatesPage() {
   const qc = useQueryClient();
 
-  // Search form state
-  const [search, setSearch] = useState({
-    serial_number: "", fullname: "", program: "",
-    graduation_year: "", status: "", academic_year: "",
-    exact_match: false, sort_by: "serial_number", sort_dir: "asc",
-  });
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [offset, setOffset]             = useState(0);
-  const limit = 20;
+  // Browse state
+  const [uniFilter,   setUniFilter]   = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [searchQ,      setSearchQ]     = useState("");
+  const [offset,       setOffset]      = useState(0);
 
-  // Detail panel state
-  const [selected,   setSelected]   = useState(null);
-  const [modal,      setModal]      = useState(null);
-  const [reason,     setReason]     = useState("");
+  // Overlay state
+  const [overlayIndex, setOverlayIndex] = useState(null); // index in results
+  const [modal,        setModal]        = useState(null);
+  const [reason,       setReason]       = useState("");
 
-  const searchMut = useMutation({
-    mutationFn: () => {
-      const payload = Object.fromEntries(
-        Object.entries(search).filter(([, v]) => v !== "" && v !== false)
-      );
-      if (search.exact_match) payload.exact_match = true;
-      return adminSearchCertificates(payload, { limit, offset });
-    },
+  // University summary for filter dropdown
+  const { data: uniSummary = [] } = useQuery({
+    queryKey: ["admin-certs-uni-summary"],
+    queryFn:  () => api.get("/admin/certificates/universities-summary")
+                       .then(r => r.data),
   });
 
-  const detailMut = useMutation({
-    mutationFn: (id) => adminGetCertificateStatus(id),
-    onSuccess:  (data) => setSelected(data),
+  // Main cert list
+  const browseParams = {
+    limit:  LIMIT,
+    offset,
+    ...(uniFilter    && { university_id: parseInt(uniFilter) }),
+    ...(statusFilter && { status: statusFilter }),
+  };
+
+  const { data: certs, isLoading } = useQuery({
+    queryKey: ["admin-certs-browse", browseParams],
+    queryFn:  () => api.get("/admin/certificates/by-university",
+                            { params: browseParams }).then(r => r.data),
+    staleTime: 0,
+    keepPreviousData: true,
+  });
+
+  // Filter by local search (name / serial)
+  const results = (certs?.results || []).filter(c =>
+    !searchQ ||
+    c.fullname.toLowerCase().includes(searchQ.toLowerCase()) ||
+    c.serial_number.toLowerCase().includes(searchQ.toLowerCase()) ||
+    c.program.toLowerCase().includes(searchQ.toLowerCase())
+  );
+
+  // Selected cert for the overlay
+  const selectedCert = overlayIndex !== null ? results[overlayIndex] : null;
+
+  // Detail for selected cert
+  const { data: certDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ["admin-cert-status", selectedCert?.certificate_id],
+    queryFn:  () => adminGetCertificateStatus(selectedCert.certificate_id),
+    enabled:  !!selectedCert,
   });
 
   const changeMut = useMutation({
-    mutationFn: ({ certId, newStatus, reason }) =>
-      adminChangeCertificateStatus(certId, { new_status: newStatus, reason }),
+    mutationFn: ({ newStatus, reason }) =>
+      adminChangeCertificateStatus(selectedCert.certificate_id, {
+        new_status: newStatus, reason,
+      }),
     onSuccess: () => {
       setModal(null); setReason("");
-      detailMut.mutate(selected.certificate_id);
-      searchMut.mutate();
+      qc.invalidateQueries(["admin-cert-status"]);
+      qc.invalidateQueries(["admin-certs-browse"]);
     },
   });
 
-  const setSort = (col) => {
-    setSearch(p => ({
-      ...p,
-      sort_by:  col,
-      sort_dir: p.sort_by === col && p.sort_dir === "asc" ? "desc" : "asc",
-    }));
-  };
+  const openOverlay = useCallback((idx) => setOverlayIndex(idx), []);
+  const closeOverlay = useCallback(() => setOverlayIndex(null), []);
 
-  const SortIcon = ({ col }) => {
-    if (search.sort_by !== col) return null;
-    return search.sort_dir === "asc"
-      ? <ChevronUp className="w-3 h-3 inline ml-0.5" />
-      : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
-  };
+  const handlePrev = useCallback(() => {
+    setOverlayIndex(i => (i > 0 ? i - 1 : i));
+  }, []);
+
+  const handleNext = useCallback(() => {
+    setOverlayIndex(i => (i < results.length - 1 ? i + 1 : i));
+  }, [results.length]);
 
   return (
     <div>
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-slate-800">Certificates</h1>
-        <p className="text-slate-500 text-sm">Search and manage certificates across all universities</p>
+        <p className="text-slate-500 text-sm mt-0.5">
+          All certificates across all institutions.
+          Click any row to view details.
+        </p>
       </div>
 
-      {/* Search panel */}
-      <div className="card p-5 mb-5">
-        {/* Basic row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-          <div>
-            <label className="label">Serial Number</label>
-            <input className="input" placeholder="CS2025-001 (exact)"
-              value={search.serial_number}
-              onChange={e => setSearch(p => ({ ...p, serial_number: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">Full Name</label>
-            <input className="input" placeholder="Contains name…"
-              value={search.fullname}
-              onChange={e => setSearch(p => ({ ...p, fullname: e.target.value }))} />
-          </div>
-          <div>
-            <label className="label">Program</label>
-            <input className="input"
-              placeholder={search.exact_match ? "Exact program…" : "Contains program…"}
-              value={search.program}
-              onChange={e => setSearch(p => ({ ...p, program: e.target.value }))} />
-          </div>
-        </div>
+      {/* Filter bar */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 mb-5">
+        <div className="flex flex-wrap gap-3 items-end">
 
-        {/* Advanced toggle */}
-        <button
-          type="button"
-          onClick={() => setShowAdvanced(p => !p)}
-          className="flex items-center gap-1.5 text-xs text-slate-500
-                     hover:text-slate-700 mb-3"
-        >
-          <SlidersHorizontal className="w-3.5 h-3.5" />
-          {showAdvanced ? "Hide advanced filters" : "Advanced filters"}
-        </button>
-
-        {showAdvanced && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3
-                           pt-3 border-t border-slate-100">
-            <div>
-              <label className="label">Status</label>
-              <select className="input"
-                value={search.status}
-                onChange={e => setSearch(p => ({ ...p, status: e.target.value }))}>
-                {STATUSES.map(s => (
-                  <option key={s} value={s}>{s || "All statuses"}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Graduation Year</label>
-              <input type="number" className="input" placeholder="2025"
-                value={search.graduation_year}
-                onChange={e => setSearch(p => ({
-                  ...p, graduation_year: e.target.value,
-                }))} />
-            </div>
-            <div>
-              <label className="label">Academic Year</label>
-              <select className="input"
-                value={search.academic_year}
-                onChange={e => setSearch(p => ({ ...p, academic_year: e.target.value }))}>
-                {YEARS.map(y => (
-                  <option key={y} value={y}>{y || "All years"}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="label">Sort By</label>
-              <select className="input"
-                value={search.sort_by}
-                onChange={e => setSearch(p => ({ ...p, sort_by: e.target.value }))}>
-                {SORT_FIELDS.map(f => (
-                  <option key={f.value} value={f.value}>{f.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Exact match toggle */}
-            <div className="col-span-2 sm:col-span-4">
-              <label className="flex items-center gap-2 cursor-pointer w-fit">
-                <div
-                  onClick={() => setSearch(p => ({ ...p, exact_match: !p.exact_match }))}
-                  className={`w-10 h-5 rounded-full transition-colors relative ${
-                    search.exact_match ? "bg-sky-500" : "bg-slate-200"
-                  }`}
-                >
-                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full
-                                    shadow transition-transform ${
-                    search.exact_match ? "translate-x-5" : "translate-x-0.5"
-                  }`} />
-                </div>
-                <span className="text-sm text-slate-600">
-                  Exact match for program and name
-                  <span className="text-xs text-slate-400 ml-1">
-                    {search.exact_match
-                      ? "(typing 'computer science' only matches that exact program)"
-                      : "(typing 'computer' matches all computer programs)"}
-                  </span>
-                </span>
-              </label>
+          {/* Search */}
+          <div className="flex-1 min-w-[180px]">
+            <label className="block text-xs font-semibold text-slate-500
+                                uppercase tracking-wide mb-1.5">
+              Search
+            </label>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2
+                                  -translate-y-1/2 text-slate-400" />
+              <input
+                className="w-full pl-8 pr-3 py-2 border border-slate-200
+                            rounded-lg text-sm focus:outline-none
+                            focus:ring-2 focus:ring-sky-500"
+                placeholder="Name, serial number, or program…"
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+              />
             </div>
           </div>
-        )}
 
-        <div className="flex gap-2">
-          <button
-            onClick={() => { setOffset(0); searchMut.mutate(); }}
-            disabled={searchMut.isPending}
-            className="btn-primary flex items-center gap-2"
-          >
-            {searchMut.isPending
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <Search className="w-4 h-4" />}
-            Search
-          </button>
-          {searchMut.data && (
+          {/* University filter */}
+          <div className="min-w-[200px]">
+            <label className="block text-xs font-semibold text-slate-500
+                                uppercase tracking-wide mb-1.5">
+              Institution
+            </label>
+            <select
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg
+                          text-sm bg-white focus:outline-none focus:ring-2
+                          focus:ring-sky-500"
+              value={uniFilter}
+              onChange={e => { setUniFilter(e.target.value); setOffset(0); }}
+            >
+              <option value="">All institutions</option>
+              {uniSummary.map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.university_name} ({u.cert_count})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Status filter */}
+          <div className="min-w-[140px]">
+            <label className="block text-xs font-semibold text-slate-500
+                                uppercase tracking-wide mb-1.5">
+              Status
+            </label>
+            <select
+              className="w-full px-3 py-2 border border-slate-200 rounded-lg
+                          text-sm bg-white focus:outline-none focus:ring-2
+                          focus:ring-sky-500"
+              value={statusFilter}
+              onChange={e => { setStatusFilter(e.target.value); setOffset(0); }}
+            >
+              {STATUSES.map(s => (
+                <option key={s} value={s}>{s || "All statuses"}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Clear */}
+          {(uniFilter || statusFilter || searchQ) && (
             <button
               onClick={() => {
-                setSearch({
-                  serial_number: "", fullname: "", program: "",
-                  graduation_year: "", status: "", academic_year: "",
-                  exact_match: false, sort_by: "serial_number", sort_dir: "asc",
-                });
-                searchMut.reset();
-                setSelected(null);
+                setUniFilter(""); setStatusFilter("");
+                setSearchQ(""); setOffset(0);
               }}
-              className="btn-secondary text-sm"
+              className="flex items-center gap-1.5 text-sm text-slate-500
+                          hover:text-slate-700 border border-slate-200
+                          px-3 py-2 rounded-lg transition-colors"
             >
+              <X className="w-3.5 h-3.5" />
               Clear
             </button>
           )}
+
+          <p className="text-xs text-slate-400 ml-auto self-end pb-2">
+            {certs ? `${certs.total} total` : ""}
+            {searchQ && results.length !== certs?.total
+              ? ` · ${results.length} shown` : ""}
+          </p>
         </div>
       </div>
 
-      {/* Broad warning */}
-      {searchMut.data?.broad_warning && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200
-                         text-amber-700 text-sm px-4 py-3 rounded-lg mb-4">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          Your search returned {searchMut.data.total} results.
-          Enable <strong>Exact match</strong> above to narrow results.
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-
-        {/* Results table */}
-        {searchMut.data && (
-          <div className="card overflow-hidden">
-            <div className="px-4 py-3 border-b border-slate-100 flex items-center
-                             justify-between text-sm">
-              <span className="text-slate-500">
-                {searchMut.data.total} result{searchMut.data.total !== 1 ? "s" : ""}
-                {searchMut.data.total > limit &&
-                  ` — showing ${offset + 1}–${Math.min(offset + limit, searchMut.data.total)}`}
-              </span>
-              <div className="flex gap-1">
-                <button
-                  disabled={offset === 0}
-                  onClick={() => { setOffset(Math.max(0, offset - limit)); searchMut.mutate(); }}
-                  className="px-2 py-1 text-xs rounded border border-slate-200
-                             disabled:opacity-40 hover:bg-slate-50"
-                >← Prev</button>
-                <button
-                  disabled={offset + limit >= searchMut.data.total}
-                  onClick={() => { setOffset(offset + limit); searchMut.mutate(); }}
-                  className="px-2 py-1 text-xs rounded border border-slate-200
-                             disabled:opacity-40 hover:bg-slate-50"
-                >Next →</button>
-              </div>
-            </div>
-
-            {/* Sortable table header */}
+      {/* Table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        {isLoading ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="w-6 h-6 animate-spin text-slate-300" />
+          </div>
+        ) : results.length === 0 ? (
+          <div className="text-center py-16 text-slate-400 text-sm">
+            No certificates found matching your filters.
+          </div>
+        ) : (
+          <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr className="text-left">
-                    {[
-                      { col: "serial_number",   label: "Serial" },
-                      { col: "fullname",         label: "Name" },
-                      { col: "program",          label: "Program" },
-                      { col: "graduation_year",  label: "Year" },
-                    ].map(({ col, label }) => (
-                      <th key={col}
-                        onClick={() => setSort(col)}
-                        className="px-3 py-2.5 font-medium text-slate-500 text-xs
-                                   cursor-pointer hover:text-slate-700 select-none">
-                        {label}<SortIcon col={col} />
-                      </th>
+                <thead className="bg-slate-50 border-b border-slate-200">
+                  <tr className="text-left text-xs font-semibold text-slate-500">
+                    {["Serial Number", "Name", "Program", "Year",
+                      "Institution", "Status"].map(h => (
+                      <th key={h} className="px-4 py-3">{h}</th>
                     ))}
-                    <th className="px-3 py-2.5 font-medium text-slate-500 text-xs">
-                      Status
-                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-50">
-                  {searchMut.data.results.map(cert => (
-                    <tr key={cert.certificate_id}
-                      onClick={() => detailMut.mutate(cert.certificate_id)}
-                      className={`cursor-pointer hover:bg-slate-50 transition-colors ${
-                        selected?.certificate_id === cert.certificate_id
-                          ? "bg-sky-50" : ""
-                      }`}
+                  {results.map((cert, idx) => (
+                    <tr
+                      key={cert.certificate_id}
+                      onClick={() => openOverlay(idx)}
+                      className="hover:bg-sky-50 cursor-pointer
+                                   transition-colors group"
                     >
-                      <td className="px-3 py-2.5 font-mono text-xs text-slate-600">
+                      <td className="px-4 py-3 font-mono text-xs
+                                       text-slate-600">
                         {cert.serial_number}
                       </td>
-                      <td className="px-3 py-2.5 font-medium text-slate-800 max-w-[120px] truncate">
+                      <td className="px-4 py-3 font-medium text-slate-800
+                                       max-w-[150px] truncate">
                         {cert.fullname}
                       </td>
-                      <td className="px-3 py-2.5 text-slate-500 max-w-[120px] truncate">
+                      <td className="px-4 py-3 text-slate-500
+                                       max-w-[160px] truncate">
                         {cert.program}
                       </td>
-                      <td className="px-3 py-2.5 text-slate-500">
+                      <td className="px-4 py-3 text-slate-500 font-mono
+                                       text-xs">
                         {cert.graduation_year}
                       </td>
-                      <td className="px-3 py-2.5">
+                      <td className="px-4 py-3 text-slate-500
+                                       max-w-[160px] truncate text-xs">
+                        {cert.issuer}
+                      </td>
+                      <td className="px-4 py-3">
                         <Badge status={cert.current_status} />
                       </td>
                     </tr>
@@ -313,116 +248,90 @@ export default function AdminCertificatesPage() {
                 </tbody>
               </table>
             </div>
-          </div>
-        )}
 
-        {/* Detail panel */}
-        {selected && (
-          <div className="card p-5">
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h2 className="font-semibold text-slate-800">{selected.fullname}</h2>
-                <p className="text-xs font-mono text-slate-400">{selected.serial_number}</p>
-              </div>
-              <Badge status={selected.current_status} />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-sm mb-4">
-              <Field label="Program"    value={selected.program} />
-              <Field label="Year"       value={selected.graduation_year} />
-              <Field label="Issuer"     value={selected.issuer} />
-              <Field label="Batch"      value={`#${selected.batch_id} — ${selected.batch_name}`} />
-            </div>
-
-            {/* Actions */}
-            {selected.current_status !== "REVOKED" && (
-              <div className="flex gap-2 flex-wrap mb-4">
-                {selected.current_status !== "REVOKED" && (
-                  <button onClick={() => setModal({ newStatus: "REVOKED" })}
-                    className="btn-danger text-sm">Revoke</button>
-                )}
-                {selected.current_status === "ACTIVE" && (
-                  <button onClick={() => setModal({ newStatus: "SUSPENDED" })}
-                    className="btn-secondary text-sm text-amber-600 border-amber-200">
-                    Suspend
-                  </button>
-                )}
-                {selected.current_status === "SUSPENDED" && (
-                  <button onClick={() => setModal({ newStatus: "ACTIVE" })}
-                    className="btn-secondary text-sm text-green-600 border-green-200">
-                    Reinstate
-                  </button>
-                )}
+            {/* Pagination */}
+            {certs && certs.total > LIMIT && (
+              <div className="flex items-center justify-between px-4 py-3
+                               border-t border-slate-100">
+                <button
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                  className="flex items-center gap-1 text-sm text-slate-500
+                              hover:text-slate-800 disabled:opacity-30
+                              disabled:cursor-not-allowed"
+                >
+                  ← Previous
+                </button>
+                <p className="text-xs text-slate-400">
+                  {offset + 1}–{Math.min(offset + LIMIT, certs.total)}
+                  {" "}of {certs.total}
+                </p>
+                <button
+                  disabled={offset + LIMIT >= certs.total}
+                  onClick={() => setOffset(offset + LIMIT)}
+                  className="flex items-center gap-1 text-sm text-slate-500
+                              hover:text-slate-800 disabled:opacity-30
+                              disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
               </div>
             )}
-
-            {/* History */}
-            <h3 className="text-xs font-semibold text-slate-400 uppercase
-                            tracking-wide mb-2">History</h3>
-            {selected.history.length === 0 ? (
-              <p className="text-slate-400 text-xs">No status changes recorded.</p>
-            ) : (
-              <ol className="relative border-l border-slate-200 space-y-3 ml-2">
-                {selected.history.map(h => (
-                  <li key={h.id} className="ml-4">
-                    <span className="absolute -left-1.5 w-3 h-3 bg-white
-                                      border-2 border-sky-400 rounded-full" />
-                    <p className="text-xs font-medium text-slate-700">
-                      {h.old_status} → {h.new_status}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {h.changed_by_email} · {new Date(h.changed_at).toLocaleString()}
-                    </p>
-                    {h.reason && (
-                      <p className="text-xs italic text-slate-500 mt-0.5">
-                        "{h.reason}"
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-          </div>
+          </>
         )}
       </div>
 
+      {/* Certificate detail overlay */}
+      {overlayIndex !== null && selectedCert && (
+        <CertificateDetailModal
+          cert={selectedCert}
+          detail={certDetail}
+          loadingDetail={detailLoading}
+          onClose={closeOverlay}
+          onPrev={handlePrev}
+          onNext={handleNext}
+          hasPrev={overlayIndex > 0}
+          hasNext={overlayIndex < results.length - 1}
+          currentIndex={overlayIndex}
+          total={results.length}
+          onAction={(newStatus) => setModal({ newStatus })}
+          actionLoading={changeMut.isPending}
+        />
+      )}
+
+      {/* Confirm action modal */}
       <ConfirmModal
         open={!!modal}
         onClose={() => setModal(null)}
-        title={modal?.newStatus === "ACTIVE"    ? "Reinstate Certificate" :
-               modal?.newStatus === "REVOKED"   ? "Revoke Certificate"    :
-                                                  "Suspend Certificate"}
+        title={
+          modal?.newStatus === "ACTIVE"    ? "Reinstate Certificate" :
+          modal?.newStatus === "REVOKED"   ? "Revoke Certificate"    :
+                                             "Suspend Certificate"
+        }
         message={
           modal?.newStatus === "REVOKED"
-            ? "Permanent and irreversible. The certificate will be marked revoked."
+            ? "This is permanent and cannot be undone."
             : modal?.newStatus === "SUSPENDED"
             ? "Certificate will appear as SUSPENDED on verification."
-            : "Certificate will be reinstated to ACTIVE."
+            : "Certificate will return to ACTIVE."
         }
         confirmLabel={modal?.newStatus === "ACTIVE" ? "Reinstate" : modal?.newStatus}
         confirmClass={modal?.newStatus === "REVOKED" ? "btn-danger" : "btn-primary"}
         loading={changeMut.isPending}
-        onConfirm={() => changeMut.mutate({
-          certId: selected.certificate_id,
-          newStatus: modal.newStatus, reason,
-        })}
+        onConfirm={() =>
+          changeMut.mutate({ newStatus: modal.newStatus, reason })
+        }
       >
         <div className="mt-3">
           <label className="label text-xs">Reason</label>
-          <textarea className="input text-sm resize-none" rows={2}
-            value={reason} onChange={e => setReason(e.target.value)}
-            placeholder="Reason for this change…" />
+          <textarea
+            className="input text-sm resize-none" rows={2}
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="Reason for this change…"
+          />
         </div>
       </ConfirmModal>
-    </div>
-  );
-}
-
-function Field({ label, value }) {
-  return (
-    <div>
-      <p className="text-xs text-slate-400 mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-slate-700">{value}</p>
     </div>
   );
 }

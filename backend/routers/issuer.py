@@ -7,6 +7,12 @@ from backend.models.user import User
 from backend.models.batch import CertificateBatch
 from backend.models.certificate import CertificateRecord
 from backend.schemas.certificate import BatchUploadResponse
+from backend.models.status import (
+    CertificateStatus, CertificateStatusHistory,
+    CertificateLifecycleStatus,
+)
+from backend.models.certificate import CertificateRecord
+from backend.models.batch import CertificateBatch
 from backend.schemas.status import (
     StatusChangeRequest,
     StatusChangeResponse,
@@ -48,6 +54,67 @@ async def upload_batch(
         academic_year=academic_year,
         validated_rows=validated_rows,
     )
+
+
+@router.get("/status-stats")
+def get_status_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    """Certificate status breakdown for the issuer's institution."""
+    if not current_user.university_id:
+        return {"active": 0, "revoked": 0, "suspended": 0}
+
+    records = (
+        db.query(CertificateStatus)
+        .join(CertificateRecord,
+              CertificateStatus.certificate_id == CertificateRecord.id)
+        .filter(CertificateRecord.university_id == current_user.university_id)
+        .all()
+    )
+
+    active    = sum(1 for r in records
+                    if r.current_status == CertificateLifecycleStatus.ACTIVE)
+    revoked   = sum(1 for r in records
+                    if r.current_status == CertificateLifecycleStatus.REVOKED)
+    suspended = sum(1 for r in records
+                    if r.current_status == CertificateLifecycleStatus.SUSPENDED)
+
+    return {"active": active, "revoked": revoked, "suspended": suspended}
+
+
+@router.get("/recent-activity")
+def get_recent_activity(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_issuer),
+):
+    """Last 10 certificate status changes for this institution."""
+    if not current_user.university_id:
+        return []
+
+    rows = (
+        db.query(CertificateStatusHistory, CertificateRecord)
+        .join(CertificateRecord,
+              CertificateStatusHistory.certificate_id == CertificateRecord.id)
+        .filter(CertificateRecord.university_id == current_user.university_id)
+        .order_by(CertificateStatusHistory.changed_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    return [
+        {
+            "certificate_id": cert.id,
+            "serial_number":  cert.serial_number,
+            "fullname":       cert.fullname,
+            "old_status":     hist.old_status,
+            "new_status":     hist.new_status,
+            "reason":         hist.reason,
+            "changed_at":     hist.changed_at.isoformat(),
+        }
+        for hist, cert in rows
+    ]
+
 
 
 @router.get("/batches", summary="List all batches for this university")
@@ -191,6 +258,119 @@ def get_issuer_stats(
         "total_certificates": total_certs,
     }
 
+# Append to backend/routers/issuer.py
+
+@router.get("/stats/extended")
+def get_extended_stats(
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_issuer),
+):
+    """Extended statistics for the issuer settings page."""
+    if not current_user.university_id:
+        return {}
+
+    from backend.models.certificate import CertificateRecord
+    from backend.models.batch import CertificateBatch
+    from backend.models.status import (
+        CertificateStatus, CertificateStatusHistory,
+        CertificateLifecycleStatus,
+    )
+    from backend.models.university import University
+    from backend.models.verification_log import VerificationLog
+    from sqlalchemy import func as sqlfunc
+
+    uid = current_user.university_id
+
+    # Total batches and certs
+    total_batches = db.query(CertificateBatch).filter(
+        CertificateBatch.university_id == uid
+    ).count()
+
+    total_certs = db.query(CertificateRecord).filter(
+        CertificateRecord.university_id == uid
+    ).count()
+
+    # Status breakdown
+    statuses = (
+        db.query(CertificateStatus)
+        .join(CertificateRecord,
+              CertificateStatus.certificate_id == CertificateRecord.id)
+        .filter(CertificateRecord.university_id == uid)
+        .all()
+    )
+    active    = sum(1 for s in statuses if s.current_status == CertificateLifecycleStatus.ACTIVE)
+    revoked   = sum(1 for s in statuses if s.current_status == CertificateLifecycleStatus.REVOKED)
+    suspended = sum(1 for s in statuses if s.current_status == CertificateLifecycleStatus.SUSPENDED)
+
+    # Revocation rate
+    revocation_rate = round((revoked / total_certs) * 100, 1) if total_certs > 0 else 0
+
+    # Average certs per batch
+    avg_per_batch = round(total_certs / total_batches, 1) if total_batches > 0 else 0
+
+    # Most active academic year
+    year_row = (
+        db.query(CertificateBatch.academic_year,
+                 sqlfunc.count(CertificateRecord.id).label("cnt"))
+        .join(CertificateRecord,
+              CertificateBatch.id == CertificateRecord.batch_id)
+        .filter(CertificateBatch.university_id == uid)
+        .group_by(CertificateBatch.academic_year)
+        .order_by(sqlfunc.count(CertificateRecord.id).desc())
+        .first()
+    )
+    most_active_year = year_row.academic_year if year_row else None
+
+    # Verifications for this institution's certs (count from logs)
+    # Match by issuer name (lowercased university name)
+    issuer_name_lower = (
+        db.query(University)
+        .filter(University.id == uid)
+        .first()
+    )
+    verif_count = 0
+    if issuer_name_lower:
+        verif_count = db.query(VerificationLog).filter(
+            VerificationLog.serial_number.in_(
+                db.query(CertificateRecord.serial_number).filter(
+                    CertificateRecord.university_id == uid
+                )
+            )
+        ).count()
+
+    # Last batch date
+    last_batch = (
+        db.query(CertificateBatch)
+        .filter(CertificateBatch.university_id == uid)
+        .order_by(CertificateBatch.created_at.desc())
+        .first()
+    )
+
+    # Revocations performed by this specific issuer account
+    revocations_by_me = (
+        db.query(CertificateStatusHistory)
+        .filter(
+            CertificateStatusHistory.changed_by == current_user.id,
+            CertificateStatusHistory.new_status == "REVOKED",
+        )
+        .count()
+    )
+
+    return {
+        "total_batches":      total_batches,
+        "total_certificates": total_certs,
+        "active":             active,
+        "revoked":            revoked,
+        "suspended":          suspended,
+        "revocation_rate":    revocation_rate,
+        "avg_per_batch":      avg_per_batch,
+        "most_active_year":   most_active_year,
+        "verifications_received": verif_count,
+        "revocations_by_me":  revocations_by_me,
+        "last_batch_name":    last_batch.batch_name if last_batch else None,
+        "last_batch_date":    last_batch.created_at.isoformat() if last_batch else None,
+    }
+
 @router.post("/batches/upload", response_model=BatchUploadResponse)
 async def upload_batch(
     file:          UploadFile = File(...),
@@ -217,3 +397,104 @@ async def upload_batch(
         validated_rows=validated_rows,
         uploaded_by=current_user.id,         
     )
+
+
+@router.get("/certificates/batches-summary")
+def get_batches_cert_summary(
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_issuer),
+):
+    """
+    Returns all batches for this issuer's university with cert counts.
+    Used to build the left-side batch list.
+    """
+    if not current_user.university_id:
+        return []
+
+    batches = db.query(CertificateBatch).filter(
+        CertificateBatch.university_id == current_user.university_id
+    ).order_by(CertificateBatch.academic_year.desc(),
+               CertificateBatch.created_at.desc()).all()
+
+    result = []
+    for b in batches:
+        cert_count = db.query(CertificateRecord).filter(
+            CertificateRecord.batch_id == b.id
+        ).count()
+
+        uploader = None
+        if b.uploaded_by:
+            u = db.query(User).filter(User.id == b.uploaded_by).first()
+            if u:
+                uploader = u.department or u.issuer_name or u.email
+
+        result.append({
+            "batch_id":         b.id,
+            "batch_name":       b.batch_name,
+            "academic_year":    b.academic_year,
+            "cert_count":       cert_count,
+            "uploaded_by_dept": uploader or "—",
+            "created_at":       b.created_at.isoformat(),
+        })
+
+    return result
+
+
+@router.get("/certificates/by-batch/{batch_id}")
+def get_certs_by_batch(
+    batch_id:     int,
+    limit:        int     = Query(default=100, le=500),
+    offset:       int     = Query(default=0, ge=0),
+    db:           Session = Depends(get_db),
+    current_user: User    = Depends(require_issuer),
+):
+    """Returns all certificates in a batch. Scoped to this university."""
+    batch = db.query(CertificateBatch).filter(
+        CertificateBatch.id == batch_id,
+        CertificateBatch.university_id == current_user.university_id,
+    ).first()
+
+    if not batch:
+        raise HTTPException(
+            status_code=404,
+            detail="Batch not found or does not belong to your institution."
+        )
+
+    records = (
+        db.query(CertificateRecord)
+        .filter(CertificateRecord.batch_id == batch_id)
+        .order_by(CertificateRecord.serial_number.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    cert_ids   = [r.id for r in records]
+    status_map = {
+        s.certificate_id: s.current_status.value
+        for s in db.query(CertificateStatus).filter(
+            CertificateStatus.certificate_id.in_(cert_ids)
+        ).all()
+    }
+
+    total = db.query(CertificateRecord).filter(
+        CertificateRecord.batch_id == batch_id
+    ).count()
+
+    return {
+        "batch_id":    batch.id,
+        "batch_name":  batch.batch_name,
+        "academic_year": batch.academic_year,
+        "total":       total,
+        "results": [
+            {
+                "certificate_id":  r.id,
+                "serial_number":   r.serial_number,
+                "fullname":        r.fullname,
+                "program":         r.program,
+                "graduation_year": r.graduation_year,
+                "current_status":  status_map.get(r.id, "ACTIVE"),
+            }
+            for r in records
+        ],
+    }

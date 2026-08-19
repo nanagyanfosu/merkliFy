@@ -2,10 +2,12 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
-from backend.routers import auth, admin, issuer, verification, setup
+from backend.routers import auth, admin, issuer, verification, setup, registration
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+
+
 
 
 app = FastAPI(
@@ -35,6 +37,7 @@ app.include_router(admin.router)
 app.include_router(issuer.router)
 app.include_router(verification.router)
 app.include_router(setup.router)
+app.include_router(registration.router)
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter

@@ -5,7 +5,7 @@ import { useAuth } from "../../context/AuthContext";
 import { getMe } from "../../api/auth";
 import {
   GraduationCap, LayoutDashboard, Upload, FolderOpen,
-  Search, Settings, LogOut, Menu, X, ShieldCheck
+  Search, Settings, LogOut, Menu, X, ShieldCheck, HelpCircle
 } from "lucide-react";
 
 const NAV = [
@@ -14,6 +14,7 @@ const NAV = [
   { to: "/issuer/batches",      label: "Batches",        icon: FolderOpen },
   { to: "/issuer/certificates", label: "Certificates",   icon: Search },
   { to: "/issuer/settings",     label: "Settings",       icon: Settings },
+  { to: "/issuer/help",         label: "Help",           icon: HelpCircle }
 ];
 
 export default function IssuerLayout() {

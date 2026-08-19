@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel as PydanticBase, validator
 
@@ -14,6 +14,8 @@ from backend.services.auth_service import (
 from backend.models.status import CertificateStatusHistory
 from backend.models.certificate import CertificateRecord
 from backend.models.university import University, TrustStatus
+from backend.models.batch import CertificateBatch
+from backend.models.status import CertificateStatus
 from datetime import datetime, timezone
 from backend.models.verification_log import VerificationLog
 from backend.services.status_service import (
@@ -24,6 +26,10 @@ from backend.services.status_service import (
 )
 from backend.schemas.status import StatusChangeRequest, CertificateSearchRequest
 from backend.models.verification_log import VerificationLog
+from backend.models.university import University
+from backend.models.pending_registration import PendingRegistration
+from backend.services.issuer_registry_service import register_university
+from backend.schemas.university import CreateUniversityRequest
 from backend.models.university import University
 
 
@@ -59,9 +65,7 @@ def get_dashboard_summary(
     all_issuers = db.query(User).filter(User.role == UserRole.ISSUER).all()
     pending_issuers_raw = [u for u in all_issuers if u.is_temp_password]
 
-    # For pending issuers — find who created them (via status history is
-    # not applicable here; we use created_at ordering as a proxy.
-    # Better: add a created_by FK to users — for now return email + created_at)
+
     uni_map = {u.id: u.university_name for u in all_unis}
     admin_accounts = db.query(User).filter(
         User.role == UserRole.ADMIN
@@ -116,6 +120,13 @@ def get_dashboard_summary(
         CertificateStatusHistory.changed_at >= last_7_days
     ).count()
 
+    # Total certificates and authentic verifications for today
+    total_certs_system = db.query(CertificateRecord).count()
+    authentic_today = db.query(VerificationLog).filter(
+        VerificationLog.timestamp >= today_start,
+        VerificationLog.verification_result == "AUTHENTIC",
+    ).count()
+
     return {
         "universities": {
             "total":   len(all_unis),
@@ -138,11 +149,13 @@ def get_dashboard_summary(
             "pending_list":  pending_issuers,
         },
         "activity": {
-            "batches_last_7_days":       recent_batches,
-            "verifications_today":       verifications_today,
-            "verifications_yesterday":   verifications_yesterday,
-            "anomalies_last_24h":        recent_anomalies,
+            "batches_last_7_days":        recent_batches,
+            "verifications_today":        verifications_today,
+            "verifications_yesterday":    verifications_yesterday,
+            "anomalies_last_24h":         recent_anomalies,
             "status_changes_last_7_days": recent_changes,
+            "total_certificates_system":  total_certs_system,
+            "authentic_today":            authentic_today,
         },
     }
 
@@ -496,3 +509,204 @@ def get_issuer_detail(
                                 if last_batch else None,
         },
     }
+
+
+@router.get("/pending-registrations")
+def list_pending_registrations(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """All submitted pre-registration requests awaiting review."""
+    regs = db.query(PendingRegistration).filter(
+        PendingRegistration.status == "PENDING"
+    ).order_by(PendingRegistration.submitted_at.desc()).all()
+
+    return [
+        {
+            "id":                 r.id,
+            "university_name":    r.university_name,
+            "institution_type":   r.institution_type,
+            "location":           r.location,
+            "official_email":     r.official_email,
+            "phone":              r.phone,
+            "website_url":        r.website_url,
+            "domain":             r.domain,
+            "year_established":   r.year_established,
+            "student_population": r.student_population,
+            "contact_name":       r.contact_name,
+            "contact_role":       r.contact_role,
+            "notes":              r.notes,
+            "submitted_at":       r.submitted_at.isoformat(),
+        }
+        for r in regs
+    ]
+
+
+@router.post("/pending-registrations/{reg_id}/approve")
+def approve_pending_registration(
+    reg_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """
+    Converts a pending registration into a full university record.
+    One click — all fields are carried over from the submission.
+    """
+    reg = db.query(PendingRegistration).filter(
+        PendingRegistration.id == reg_id
+    ).first()
+
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found.")
+    if reg.status != "PENDING":
+        raise HTTPException(
+            status_code=400,
+            detail=f"This registration has already been {reg.status.lower()}."
+        )
+
+    from backend.schemas.university import CreateUniversityRequest
+    from backend.models.university import InstitutionType
+
+    payload = CreateUniversityRequest(
+        university_name=    reg.university_name,
+        institution_type=   InstitutionType(reg.institution_type),
+        location=           reg.location,
+        official_email=     reg.official_email,
+        phone=              reg.phone,
+        website_url=        reg.website_url,
+        domain=             reg.domain,
+        year_established=   reg.year_established,
+        student_population= reg.student_population,
+    )
+
+    result = register_university(db, payload, admin)
+
+    # Mark registration as approved
+    reg.status      = "APPROVED"
+    reg.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "message":       f"{reg.university_name} has been registered successfully.",
+        "university_id": result.id,
+        "university_code": result.university_code,
+    }
+
+
+@router.post("/pending-registrations/{reg_id}/reject")
+def reject_pending_registration(
+    reg_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    reg = db.query(PendingRegistration).filter(
+        PendingRegistration.id == reg_id
+    ).first()
+    if not reg:
+        raise HTTPException(status_code=404, detail="Registration not found.")
+
+    reg.status      = "REJECTED"
+    reg.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"message": f"Registration for {reg.university_name} rejected."}
+
+
+@router.get("/certificates/by-university")
+def get_certs_by_university(
+    university_id: int | None = None,
+    batch_id:      int | None = None,
+    limit:         int        = Query(default=50, le=200),
+    offset:        int        = Query(default=0, ge=0),
+    db:            Session    = Depends(get_db),
+    admin:         User       = Depends(require_admin),
+):
+    """
+    Returns all certificates grouped by university and batch.
+    Filterable by university_id or batch_id.
+    Default: all universities, sorted by university name then batch date.
+    """
+    query = (
+        db.query(CertificateRecord)
+        .join(CertificateBatch,
+              CertificateRecord.batch_id == CertificateBatch.id)
+        .join(University,
+              CertificateBatch.university_id == University.id)
+    )
+
+    if university_id:
+        query = query.filter(
+            CertificateBatch.university_id == university_id
+        )
+
+    if batch_id:
+        query = query.filter(CertificateRecord.batch_id == batch_id)
+
+    query = query.order_by(
+        University.university_name.asc(),
+        CertificateBatch.created_at.desc(),
+        CertificateRecord.serial_number.asc(),
+    )
+
+    total   = query.count()
+    records = query.offset(offset).limit(limit).all()
+
+    cert_ids   = [r.id for r in records]
+    status_map = {
+        s.certificate_id: s.current_status.value
+        for s in db.query(CertificateStatus).filter(
+            CertificateStatus.certificate_id.in_(cert_ids)
+        ).all()
+    }
+
+    return {
+        "total":  total,
+        "offset": offset,
+        "limit":  limit,
+        "results": [
+            {
+                "certificate_id":  r.id,
+                "serial_number":   r.serial_number,
+                "fullname":        r.fullname,
+                "program":         r.program,
+                "graduation_year": r.graduation_year,
+                "issuer":          r.issuer,
+                "university_id":   r.university_id,
+                "batch_id":        r.batch_id,
+                "current_status":  status_map.get(r.id, "ACTIVE"),
+            }
+            for r in records
+        ],
+    }
+
+
+@router.get("/certificates/universities-summary")
+def get_universities_cert_summary(
+    db:    Session = Depends(get_db),
+    admin: User    = Depends(require_admin),
+):
+    """
+    Summary of certificates per university for the browse panel.
+    Used to build the left-side university list.
+    """
+    unis = db.query(University).order_by(University.university_name).all()
+
+    result = []
+    for u in unis:
+        batch_count = db.query(CertificateBatch).filter(
+            CertificateBatch.university_id == u.id
+        ).count()
+
+        cert_count = db.query(CertificateRecord).filter(
+            CertificateRecord.university_id == u.id
+        ).count()
+
+        result.append({
+            "id":              u.id,
+            "university_code": u.university_code,
+            "university_name": u.university_name,
+            "trust_status":    u.trust_status,
+            "batch_count":     batch_count,
+            "cert_count":      cert_count,
+        })
+
+    return result

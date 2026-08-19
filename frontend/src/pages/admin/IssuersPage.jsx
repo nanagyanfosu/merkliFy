@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listUniversities, createIssuer,
@@ -86,6 +86,14 @@ const allIssuers = universities
         university_id:   u.id,
       }))
   );
+
+  // Auto-select the first issuer when the list loads
+// so there is never an empty state on the right panel
+    useEffect(() => {
+  if (allIssuers.length > 0 && !selectedId) {
+    setSelectedId(allIssuers[0].id);
+    }
+  }, [allIssuers.length]); // only on first load
 
   const filteredIssuers = allIssuers.filter(iss => {
     const matchSearch = !issuerSearch || [

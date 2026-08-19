@@ -28,6 +28,7 @@ export default function AdminSettingsPage() {
     enabled:  tab === "activity",
     refetchInterval: 60_000,   // refresh every minute when visible
   });
+  
 
   return (
     <div className="max-w-2xl">

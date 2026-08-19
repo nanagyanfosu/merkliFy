@@ -1,280 +1,327 @@
-import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { searchCertificates } from "../../api/issuer";
-import { Link, useSearchParams } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import api from "../../api/axios";
+import { getCertificateStatus, changeCertificateStatus } from "../../api/issuer";
 import Badge from "../../components/ui/Badge";
-import {
-  Search, Loader2, ChevronRight, SlidersHorizontal,
-  AlertTriangle, X,
-} from "lucide-react";
+import ConfirmModal from "../../components/ui/ConfirmModal";
+import CertificateDetailModal from "../../components/ui/CertificateDetailModal";
+import { Hash, Loader2, Search, X, Filter } from "lucide-react";
 
-const STATUSES = ["", "ACTIVE", "REVOKED", "SUSPENDED"];
-const CURRENT_YEAR = new Date().getFullYear();
-const YEARS = ["", ...Array.from({ length: 8 }, (_, i) => CURRENT_YEAR - i)];
+const LIMIT = 100;
 
 export default function CertificateSearchPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [offset, setOffset]             = useState(0);
-  const limit = 25;
+  const qc = useQueryClient();
 
-  const [form, setForm] = useState({
-    serial_number:   searchParams.get("serial")  || "",
-    fullname:        searchParams.get("name")    || "",
-    program:         searchParams.get("program") || "",
-    graduation_year: searchParams.get("year")    || "",
-    status:          searchParams.get("status")  || "",
-    academic_year:   searchParams.get("acyear")  || "",
-    exact_match:     searchParams.get("exact") === "1",
-    sort_by:         searchParams.get("sort")    || "serial_number",
-    sort_dir:        searchParams.get("dir")     || "asc",
+  const [selectedBatch, setSelectedBatch] = useState(null);
+  const [certSearch,    setCertSearch]    = useState("");
+  const [overlayIndex,  setOverlayIndex]  = useState(null);
+  const [modal,         setModal]         = useState(null);
+  const [reason,        setReason]        = useState("");
+  const [offset,        setOffset]        = useState(0);
+
+  // Batch list
+  const { data: batchSummary = [], isLoading: batchesLoading } = useQuery({
+    queryKey: ["issuer-batches-summary"],
+    queryFn:  () => api.get("/issuer/certificates/batches-summary")
+                       .then(r => r.data),
   });
 
-  const mutation = useMutation({
-    mutationFn: () => {
-      const payload = Object.fromEntries(
-        Object.entries(form).filter(([, v]) => v !== "" && v !== false)
-      );
-      if (form.exact_match) payload.exact_match = true;
-      return searchCertificates(payload, { limit, offset });
+  // Auto-select the most recent batch on first load
+  useEffect(() => {
+    if (batchSummary.length > 0 && !selectedBatch) {
+      setSelectedBatch(batchSummary[0]);
+    }
+  }, [batchSummary, selectedBatch]);
+
+  // Certs for selected batch
+  const { data: batchCerts, isLoading: certsLoading } = useQuery({
+    queryKey: ["issuer-batch-certs", selectedBatch?.batch_id, offset],
+    queryFn:  () => api.get(
+      `/issuer/certificates/by-batch/${selectedBatch.batch_id}`,
+      { params: { limit: LIMIT, offset } }
+    ).then(r => r.data),
+    enabled:  !!selectedBatch,
+    staleTime: 0,
+  });
+
+  // Filter certs by local search
+  const results = (batchCerts?.results || []).filter(c =>
+    !certSearch ||
+    c.fullname.toLowerCase().includes(certSearch.toLowerCase()) ||
+    c.serial_number.toLowerCase().includes(certSearch.toLowerCase()) ||
+    c.program.toLowerCase().includes(certSearch.toLowerCase())
+  );
+
+  // Selected cert for overlay
+  const selectedCert = overlayIndex !== null ? results[overlayIndex] : null;
+
+  const { data: certDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ["issuer-cert-status", selectedCert?.certificate_id],
+    queryFn:  () => getCertificateStatus(selectedCert.certificate_id),
+    enabled:  !!selectedCert,
+  });
+
+  const changeMut = useMutation({
+    mutationFn: ({ newStatus, reason }) =>
+      changeCertificateStatus(selectedCert.certificate_id, {
+        new_status: newStatus, reason,
+      }),
+    onSuccess: () => {
+      setModal(null); setReason("");
+      qc.invalidateQueries(["issuer-cert-status"]);
+      qc.invalidateQueries(["issuer-batch-certs"]);
     },
   });
 
-  // Restore search on back-navigation
-  useEffect(() => {
-    if (searchParams.toString()) mutation.mutate();
-  
-  }, []);
-
-  const handleSearch = (e) => {
-    e?.preventDefault();
-    setOffset(0);
-    const p = {};
-    if (form.serial_number)  p.serial  = form.serial_number;
-    if (form.fullname)        p.name    = form.fullname;
-    if (form.program)         p.program = form.program;
-    if (form.graduation_year) p.year    = form.graduation_year;
-    if (form.status)          p.status  = form.status;
-    if (form.academic_year)   p.acyear  = form.academic_year;
-    if (form.exact_match)     p.exact   = "1";
-    if (form.sort_by !== "serial_number") p.sort = form.sort_by;
-    if (form.sort_dir !== "asc")          p.dir  = form.sort_dir;
-    setSearchParams(p);
-    mutation.mutate();
-  };
-
-  const clearSearch = () => {
-    setForm({
-      serial_number: "", fullname: "", program: "",
-      graduation_year: "", status: "", academic_year: "",
-      exact_match: false, sort_by: "serial_number", sort_dir: "asc",
-    });
-    setSearchParams({});
-    mutation.reset();
-  };
-
-  const setField = (name, value) =>
-    setForm(p => ({ ...p, [name]: value }));
+  const openOverlay  = useCallback((idx) => setOverlayIndex(idx), []);
+  const closeOverlay = useCallback(() => setOverlayIndex(null), []);
+  const handlePrev   = useCallback(() => setOverlayIndex(i => i > 0 ? i - 1 : i), []);
+  const handleNext   = useCallback(() =>
+    setOverlayIndex(i => i < results.length - 1 ? i + 1 : i),
+    [results.length]
+  );
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-800 mb-1">Certificates</h1>
-      <p className="text-slate-500 text-sm mb-5">
-        Search your institution's certificate records
-      </p>
-
-      <div className="card p-5 mb-5">
-        <form onSubmit={handleSearch}>
-          {/* Basic row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="label">Serial Number</label>
-              <input className="input" placeholder="CS2025-001"
-                value={form.serial_number}
-                onChange={e => setField("serial_number", e.target.value)} />
-            </div>
-            <div>
-              <label className="label">Full Name</label>
-              <input className="input" placeholder="Student name…"
-                value={form.fullname}
-                onChange={e => setField("fullname", e.target.value)} />
-            </div>
-            <div>
-              <label className="label">Program</label>
-              <input className="input"
-                placeholder={form.exact_match ? "Exact program name" : "Contains program…"}
-                value={form.program}
-                onChange={e => setField("program", e.target.value)} />
-            </div>
-          </div>
-
-          {/* Advanced toggle */}
-          <button type="button"
-            onClick={() => setShowAdvanced(p => !p)}
-            className="flex items-center gap-1.5 text-xs text-slate-500
-                       hover:text-slate-700 mb-3">
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            {showAdvanced ? "Hide filters" : "More filters"}
-          </button>
-
-          {showAdvanced && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3
-                             pt-3 border-t border-slate-100">
-              <div>
-                <label className="label">Status</label>
-                <select className="input" value={form.status}
-                  onChange={e => setField("status", e.target.value)}>
-                  {STATUSES.map(s => (
-                    <option key={s} value={s}>{s || "All statuses"}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Graduation Year</label>
-                <input type="number" className="input" placeholder="2025"
-                  value={form.graduation_year}
-                  onChange={e => setField("graduation_year", e.target.value)} />
-              </div>
-              <div>
-                <label className="label">Academic Year</label>
-                <select className="input" value={form.academic_year}
-                  onChange={e => setField("academic_year", e.target.value)}>
-                  {YEARS.map(y => (
-                    <option key={y} value={y}>{y || "All years"}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="label">Sort By</label>
-                <select className="input" value={form.sort_by}
-                  onChange={e => setField("sort_by", e.target.value)}>
-                  <option value="serial_number">Serial Number</option>
-                  <option value="fullname">Name</option>
-                  <option value="program">Program</option>
-                  <option value="graduation_year">Year</option>
-                </select>
-              </div>
-
-              <div className="col-span-2 sm:col-span-4">
-                <label className="flex items-center gap-2 cursor-pointer w-fit">
-                  <div
-                    onClick={() => setField("exact_match", !form.exact_match)}
-                    className={`w-10 h-5 rounded-full transition-colors relative ${
-                      form.exact_match ? "bg-teal-500" : "bg-slate-200"
-                    }`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full
-                                      shadow transition-transform ${
-                      form.exact_match ? "translate-x-5" : "translate-x-0.5"
-                    }`} />
-                  </div>
-                  <span className="text-sm text-slate-600">
-                    Exact match
-                    <span className="text-xs text-slate-400 ml-1">
-                      {form.exact_match
-                        ? "(full program name must match)"
-                        : "(program contains your text)"}
-                    </span>
-                  </span>
-                </label>
-              </div>
-            </div>
-          )}
-
-          <div className="flex gap-2">
-            <button type="submit" disabled={mutation.isPending}
-              className="btn-primary flex items-center gap-2"
-              style={{ backgroundColor: "#0f766e" }}>
-              {mutation.isPending
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <Search className="w-4 h-4" />}
-              Search
-            </button>
-            {mutation.data && (
-              <button type="button" onClick={clearSearch}
-                className="btn-secondary flex items-center gap-1.5 text-sm">
-                <X className="w-3.5 h-3.5" />
-                Clear
-              </button>
-            )}
-          </div>
-        </form>
+      <div className="mb-5">
+        <h1 className="text-2xl font-bold text-slate-800">Certificates</h1>
+        <p className="text-slate-500 text-sm mt-0.5">
+          Select a batch to browse certificates. Click any row for full details.
+        </p>
       </div>
 
-      {/* Broad warning */}
-      {mutation.data?.broad_warning && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-200
-                         text-amber-700 text-sm px-4 py-3 rounded-lg mb-4">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-          {mutation.data.total} results found. Enable{" "}
-          <strong className="mx-0.5">Exact match</strong> under filters to narrow down.
-        </div>
-      )}
+      <div className="flex gap-4">
 
-      {mutation.isError && (
-        <div className="bg-red-50 border border-red-200 text-red-600 text-sm
-                         px-4 py-3 rounded-lg mb-4">
-          {mutation.error?.response?.data?.detail || "Search failed."}
-        </div>
-      )}
-
-      {mutation.data && (
-        <div className="card overflow-hidden">
-          <div className="px-4 py-3 border-b border-slate-100 flex items-center
-                           justify-between">
-            <span className="text-sm text-slate-500">
-              {mutation.data.total} result{mutation.data.total !== 1 ? "s" : ""}
-            </span>
-            {mutation.data.total > limit && (
-              <div className="flex gap-1">
-                <button
-                  disabled={offset === 0}
-                  onClick={() => { setOffset(Math.max(0, offset - limit)); mutation.mutate(); }}
-                  className="px-2 py-1 text-xs rounded border border-slate-200
-                             disabled:opacity-40 hover:bg-slate-50">← Prev</button>
-                <button
-                  disabled={offset + limit >= mutation.data.total}
-                  onClick={() => { setOffset(offset + limit); mutation.mutate(); }}
-                  className="px-2 py-1 text-xs rounded border border-slate-200
-                             disabled:opacity-40 hover:bg-slate-50">Next →</button>
+        {/* ── LEFT: Batch selector ────────────────────────────────── */}
+        <div className="w-56 flex-shrink-0">
+          <p className="text-xs font-semibold text-slate-400 uppercase
+                          tracking-wide mb-2 px-1">
+            Batches
+          </p>
+          <div className="bg-white border border-slate-200 rounded-xl
+                           overflow-hidden">
+            {batchesLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="w-4 h-4 animate-spin text-slate-300" />
               </div>
-            )}
-          </div>
-
-          {mutation.data.results.length === 0 ? (
-            <p className="px-4 py-8 text-slate-400 text-sm text-center">
-              No certificates matched your search.
-            </p>
-          ) : (
-            <div className="divide-y divide-slate-50">
-              {mutation.data.results.map(cert => (
-                <Link
-                  key={cert.certificate_id}
-                  to={`/issuer/certificates/${cert.certificate_id}`}
-                  state={{ searchParams: searchParams.toString() }}
-                  className="flex items-center gap-3 px-4 py-3 hover:bg-slate-50"
+            ) : batchSummary.length === 0 ? (
+              <p className="text-xs text-slate-400 p-4 text-center">
+                No batches yet.
+              </p>
+            ) : (
+              batchSummary.map(b => (
+                <button
+                  key={b.batch_id}
+                  onClick={() => {
+                    setSelectedBatch(b);
+                    setOverlayIndex(null);
+                    setCertSearch("");
+                    setOffset(0);
+                  }}
+                  className={`w-full text-left px-3 py-3 border-b
+                               border-slate-50 last:border-0 transition-colors
+                               ${selectedBatch?.batch_id === b.batch_id
+                                 ? "bg-teal-50"
+                                 : "hover:bg-slate-50"
+                               }`}
                 >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-sm text-slate-800">{cert.fullname}</p>
-                      {cert.academic_year && (
-                        <span className="text-xs text-slate-400 bg-slate-100
-                                          px-1.5 py-0.5 rounded">
-                          {cert.academic_year}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {cert.serial_number} · {cert.program} · {cert.graduation_year}
+                  <div className="flex items-center gap-2">
+                    <Hash className={`w-3 h-3 flex-shrink-0 ${
+                      selectedBatch?.batch_id === b.batch_id
+                        ? "text-teal-500"
+                        : "text-slate-400"
+                    }`} />
+                    <p className={`text-xs font-medium truncate ${
+                      selectedBatch?.batch_id === b.batch_id
+                        ? "text-teal-700"
+                        : "text-slate-700"
+                    }`}>
+                      {b.batch_name}
                     </p>
                   </div>
-                  <Badge status={cert.current_status} />
-                  <ChevronRight className="w-4 h-4 text-slate-300 flex-shrink-0" />
-                </Link>
-              ))}
+                  <p className="text-xs text-slate-400 mt-0.5 pl-5">
+                    {b.academic_year} · {b.cert_count} certs
+                  </p>
+                  {b.uploaded_by_dept !== "—" && (
+                    <p className="text-xs text-slate-300 mt-0.5 pl-5 truncate">
+                      {b.uploaded_by_dept}
+                    </p>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* ── RIGHT: Certificate table ────────────────────────────── */}
+        <div className="flex-1 min-w-0">
+          {selectedBatch && (
+            <div className="mb-3 flex items-center gap-3">
+              <div className="flex-1 relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2
+                                    -translate-y-1/2 text-slate-400" />
+                <input
+                  className="w-full pl-8 pr-3 py-2 border border-slate-200
+                              rounded-lg text-sm focus:outline-none
+                              focus:ring-2 focus:ring-teal-500"
+                  placeholder="Search by name, serial, or program…"
+                  value={certSearch}
+                  onChange={e => setCertSearch(e.target.value)}
+                />
+                {certSearch && (
+                  <button onClick={() => setCertSearch("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2
+                                text-slate-400 hover:text-slate-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 whitespace-nowrap">
+                {results.length} record{results.length !== 1 ? "s" : ""}
+                {certSearch ? ` matching "${certSearch}"` : ""}
+              </p>
             </div>
           )}
+
+          <div className="bg-white border border-slate-200 rounded-xl
+                           overflow-hidden">
+            {!selectedBatch ? (
+              <div className="flex justify-center items-center py-16
+                               text-slate-400 text-sm">
+                No batch selected
+              </div>
+            ) : certsLoading ? (
+              <div className="flex justify-center py-16">
+                <Loader2 className="w-6 h-6 animate-spin text-slate-300" />
+              </div>
+            ) : results.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 text-sm">
+                {certSearch
+                  ? `No certificates match "${certSearch}"`
+                  : "No certificates in this batch"}
+              </div>
+            ) : (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr className="text-left text-xs font-semibold
+                                       text-slate-500">
+                        {["Serial Number", "Name", "Program",
+                          "Year", "Status"].map(h => (
+                          <th key={h} className="px-4 py-3">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {results.map((cert, idx) => (
+                        <tr
+                          key={cert.certificate_id}
+                          onClick={() => openOverlay(idx)}
+                          className="hover:bg-teal-50 cursor-pointer
+                                       transition-colors"
+                        >
+                          <td className="px-4 py-3 font-mono text-xs
+                                           text-slate-600">
+                            {cert.serial_number}
+                          </td>
+                          <td className="px-4 py-3 font-medium text-slate-800
+                                           max-w-[150px] truncate">
+                            {cert.fullname}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500
+                                           max-w-[160px] truncate">
+                            {cert.program}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500
+                                           font-mono text-xs">
+                            {cert.graduation_year}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge status={cert.current_status} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Pagination */}
+                {batchCerts && batchCerts.total > LIMIT && (
+                  <div className="flex items-center justify-between px-4
+                                   py-3 border-t border-slate-100">
+                    <button
+                      disabled={offset === 0}
+                      onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                      className="text-sm text-slate-500 disabled:opacity-30"
+                    >
+                      ← Previous
+                    </button>
+                    <p className="text-xs text-slate-400">
+                      {offset + 1}–{Math.min(offset + LIMIT, batchCerts.total)}
+                      {" "}of {batchCerts.total}
+                    </p>
+                    <button
+                      disabled={offset + LIMIT >= batchCerts.total}
+                      onClick={() => setOffset(offset + LIMIT)}
+                      className="text-sm text-slate-500 disabled:opacity-30"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
+      </div>
+
+      {/* Certificate detail overlay */}
+      {overlayIndex !== null && selectedCert && (
+        <CertificateDetailModal
+          cert={selectedCert}
+          detail={certDetail}
+          loadingDetail={detailLoading}
+          onClose={closeOverlay}
+          onPrev={handlePrev}
+          onNext={handleNext}
+          hasPrev={overlayIndex > 0}
+          hasNext={overlayIndex < results.length - 1}
+          currentIndex={overlayIndex}
+          total={results.length}
+          onAction={(newStatus) => setModal({ newStatus })}
+          actionLoading={changeMut.isPending}
+        />
       )}
+
+      <ConfirmModal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        title={
+          modal?.newStatus === "ACTIVE"    ? "Reinstate Certificate" :
+          modal?.newStatus === "REVOKED"   ? "Revoke Certificate"    :
+                                             "Suspend Certificate"
+        }
+        message={
+          modal?.newStatus === "REVOKED"
+            ? "This is permanent and cannot be undone."
+            : modal?.newStatus === "SUSPENDED"
+            ? "Certificate will appear as SUSPENDED on verification."
+            : "Certificate will return to ACTIVE."
+        }
+        confirmLabel={modal?.newStatus === "ACTIVE" ? "Reinstate" : modal?.newStatus}
+        confirmClass={modal?.newStatus === "REVOKED" ? "btn-danger" : "btn-primary"}
+        loading={changeMut.isPending}
+        onConfirm={() => changeMut.mutate({ newStatus: modal.newStatus, reason })}
+      >
+        <div className="mt-3">
+          <label className="label text-xs">Reason</label>
+          <textarea className="input text-sm resize-none" rows={2}
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            placeholder="Reason for this change…" />
+        </div>
+      </ConfirmModal>
     </div>
   );
 }
