@@ -17,8 +17,14 @@ export const searchCertificates = (search, params) =>
 export const getCertificateStatus = (certId) =>
   api.get(`/issuer/certificates/${certId}/status`).then(r => r.data);
 
+export const getAllCertificates = (params) =>
+  api.get("/issuer/certificates", { params }).then(r => r.data);
+
 export const changeCertificateStatus = (certId, data) =>
   api.patch(`/issuer/certificates/${certId}/status`, data).then(r => r.data);
 
 export const getAuditHistory = (params) =>
   api.get("/issuer/audit-history", { params }).then(r => r.data);
+
+export const getExtendedStats = () =>
+  api.get("/issuer/stats/extended").then(r => r.data);

@@ -51,3 +51,12 @@ export const adminGetAuditHistory = (universityId, params) =>
 // Activity
 export const getRecentActivity = () =>
   api.get("/admin/activity").then(r => r.data);
+
+export const getPendingRegistrations = () =>
+  api.get("/admin/pending-registrations").then(r => r.data);
+
+export const approvePendingRegistration = (id) =>
+  api.post(`/admin/pending-registrations/${id}/approve`).then(r => r.data);
+
+export const rejectPendingRegistration = (id) =>
+  api.post(`/admin/pending-registrations/${id}/reject`).then(r => r.data);

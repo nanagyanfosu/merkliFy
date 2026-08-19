@@ -31,6 +31,8 @@ import BatchesPage from "./pages/issuer/BatchesPage";
 import BatchDetailPage from "./pages/issuer/BatchDetailPage";
 import CertificateSearchPage from "./pages/issuer/CertificateSearchPage";
 import CertificateStatusPage from "./pages/issuer/CertificateStatusPage";
+import AdminHelpPage  from "./pages/admin/AdminHelpPage";
+import IssuerHelpPage from "./pages/issuer/IssuerHelpPage";
 
 
 export default function App() {
@@ -62,6 +64,7 @@ export default function App() {
         <Route path="logs" element={<VerificationLogsPage />} />
         <Route path="certificates" element={<AdminCertificatesPage />} />
         <Route path="settings" element={<AdminSettingsPage />} />
+        <Route path="help" element={<AdminHelpPage />} />
       </Route>
 
 
@@ -85,6 +88,7 @@ export default function App() {
         <Route path="certificates" element={<CertificateSearchPage />} />
         <Route path="certificates/:certId" element={<CertificateStatusPage />} />
         <Route path="settings" element={<IssuerSettingsPage />} />
+        <Route path="help" element={<IssuerHelpPage />} />
       </Route>
 
 
@@ -102,5 +106,6 @@ export default function App() {
       <Route path="*" element={<Navigate to="/" replace />} />
 
     </Routes>
+    
   );
 }
