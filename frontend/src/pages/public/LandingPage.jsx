@@ -1,10 +1,23 @@
-// src/pages/public/LandingPage.jsx — complete replacement
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import api from "../../api/axios";
 import { Link } from "react-router-dom";
 import {
   ArrowRight, ShieldCheck, Building2,
   Search, Lock, FileCheck, Play, Mail,
   CheckCircle2, AlertCircle, Clock, HelpCircle,
 } from "lucide-react";
+
+
+const INSTITUTION_TYPES = [
+  "University",
+  "Polytechnic",
+  "College",
+  "Professional Institution",
+  "Vocational Institute",
+  "Other",
+];
+
 
 export default function LandingPage() {
   return (
@@ -559,56 +572,104 @@ function InstitutionsSection() {
 }
 
 function InstitutionContactForm() {
+  const [form, setForm]       = useState({
+    institution_name: "", contact_name: "", email: "", notes: "",
+  });
+  const [submitted, setSubmitted] = useState(false);
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.post("/contact/request-access", form).then(r => r.data),
+    onSuccess: () => setSubmitted(true),
+  });
+
+  const inp = "w-full px-3 py-2.5 border border-slate-200 rounded-lg " +
+              "text-sm bg-white focus:outline-none focus:ring-2 " +
+              "focus:ring-teal-500";
+
+  if (submitted) {
+    return (
+      <div className="text-center py-8">
+        <div className="w-12 h-12 bg-teal-100 rounded-full flex items-center
+                         justify-center mx-auto mb-3">
+          <CheckCircle2 className="w-6 h-6 text-teal-600" />
+        </div>
+        <p className="font-semibold text-slate-800 mb-1">Request received</p>
+        <p className="text-slate-500 text-sm leading-relaxed">
+          We will review your submission and contact you at the email
+          address you provided. This usually takes 1–2 business days.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <form
+      onSubmit={e => { e.preventDefault(); mutation.mutate(); }}
       className="space-y-4"
-      onSubmit={e => {
-        e.preventDefault();
-        // TODO: wire to backend or Formspree when email is set up
-        alert("Request received. We will be in touch shortly.");
-      }}
     >
       {[
-        { id: "inst",    label: "Institution name",  type: "text",  placeholder: "University of Accra" },
-        { id: "contact", label: "Your name",          type: "text",  placeholder: "Dr. Kwame Mensah" },
-        { id: "email",   label: "Official email",     type: "email", placeholder: "registrar@university.edu.gh" },
-      ].map(({ id, label, type, placeholder }) => (
+        {
+          id: "institution_name", label: "Institution Name",
+          type: "text", placeholder: "University of Accra", required: true,
+        },
+        {
+          id: "contact_name", label: "Your Name",
+          type: "text", placeholder: "Dr. Kwame Mensah", required: true,
+        },
+        {
+          id: "email", label: "Official Email",
+          type: "email", placeholder: "registrar@university.edu.gh", required: true,
+        },
+      ].map(({ id, label, type, placeholder, required }) => (
         <div key={id}>
-          <label htmlFor={id}
-            className="block text-xs font-semibold text-slate-500
-                        uppercase tracking-wide mb-1.5">
+          <label className="block text-xs font-medium text-slate-600 mb-1">
             {label}
+            {required && <span className="text-red-400 ml-0.5">*</span>}
           </label>
-          <input id={id} type={type}
-            className="w-full px-3 py-2.5 border border-slate-200
-                        rounded-lg text-sm bg-white focus:outline-none
-                        focus:ring-2 focus:ring-teal-500"
+          <input
+            type={type}
+            className={inp}
             placeholder={placeholder}
-            required
+            value={form[id]}
+            required={required}
+            onChange={e => setForm(p => ({ ...p, [id]: e.target.value }))}
           />
         </div>
       ))}
+
       <div>
-        <label htmlFor="notes"
-          className="block text-xs font-semibold text-slate-500
-                      uppercase tracking-wide mb-1.5">
+        <label className="block text-xs font-medium text-slate-600 mb-1">
           Notes
         </label>
-        <textarea id="notes" rows={3}
-          className="w-full px-3 py-2.5 border border-slate-200
-                      rounded-lg text-sm bg-white focus:outline-none
-                      focus:ring-2 focus:ring-teal-500 resize-none"
-          placeholder="How many graduates does your institution
-issue degrees to each year?"
+        <textarea
+          className={`${inp} resize-none`}
+          rows={3}
+          placeholder="Tell us about your institution and roughly
+how many graduates you issue degrees to each year."
+          value={form.notes}
+          onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
         />
       </div>
-      <button type="submit"
+
+      {mutation.isError && (
+        <p className="text-red-600 text-sm">
+          {mutation.error?.response?.data?.detail ||
+            "Submission failed. Please try again."}
+        </p>
+      )}
+
+      <button
+        type="submit"
+        disabled={mutation.isPending}
         className="w-full flex items-center justify-center gap-2
-                    bg-teal-600 hover:bg-teal-700 text-white
-                    font-semibold py-3 rounded-lg text-sm
-                    transition-colors">
-        <Mail className="w-4 h-4" />
-        Send request
+                    bg-teal-600 hover:bg-teal-700 disabled:opacity-50
+                    text-white font-semibold py-3 rounded-lg text-sm
+                    transition-colors"
+      >
+        {mutation.isPending
+          ? <><Loader2 className="w-4 h-4 animate-spin" />Submitting…</>
+          : <><Mail className="w-4 h-4" />Send Request</>}
       </button>
     </form>
   );
