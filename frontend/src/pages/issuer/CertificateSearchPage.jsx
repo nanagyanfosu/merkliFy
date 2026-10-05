@@ -54,6 +54,7 @@ export default function CertificateSearchPage() {
 
   // Selected cert for overlay
   const selectedCert = overlayIndex !== null ? results[overlayIndex] : null;
+  const canAction = !!selectedCert?.is_owner;
 
   const { data: certDetail, isLoading: detailLoading } = useQuery({
     queryKey: ["issuer-cert-status", selectedCert?.certificate_id],
@@ -278,21 +279,23 @@ export default function CertificateSearchPage() {
 
       {/* Certificate detail overlay */}
       {overlayIndex !== null && selectedCert && (
-        <CertificateDetailModal
-          cert={selectedCert}
-          detail={certDetail}
-          loadingDetail={detailLoading}
-          onClose={closeOverlay}
-          onPrev={handlePrev}
-          onNext={handleNext}
-          hasPrev={overlayIndex > 0}
-          hasNext={overlayIndex < results.length - 1}
-          currentIndex={overlayIndex}
-          total={results.length}
-          onAction={(newStatus) => setModal({ newStatus })}
-          actionLoading={changeMut.isPending}
-        />
-      )}
+  <CertificateDetailModal
+    cert={selectedCert}
+    detail={certDetail}
+    loadingDetail={detailLoading}
+    onClose={closeOverlay}
+    onPrev={handlePrev}
+    onNext={handleNext}
+    hasPrev={overlayIndex > 0}
+    hasNext={overlayIndex < results.length - 1}
+    currentIndex={overlayIndex}
+    total={results.length}
+    // Use is_owner from the cert object — set by backend
+    onAction={selectedCert.is_owner
+      ? (newStatus) => setModal({ newStatus })
+      : null}
+  />
+)}
 
       <ConfirmModal
         open={!!modal}

@@ -2,14 +2,14 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listUniversities, createIssuer,
-  resetIssuerPassword, getIssuerDetail,
+  resetIssuerPassword, getIssuerDetail, updateIssuer,
 } from "../../api/admin";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import Badge from "../../components/ui/Badge";
 import {
   UserPlus, Loader2, Copy, CheckCircle2,
   RefreshCw, Eye, EyeOff, X, ChevronRight,
-  Building2, Hash, Calendar, Upload,
+  Building2, Hash, Calendar, Upload, Pencil, Check
 } from "lucide-react";
 
 export default function IssuersPage() {
@@ -24,6 +24,10 @@ export default function IssuersPage() {
   const [issuerSearch,   setIssuerSearch]    = useState("");
   const [uniFilter,      setUniFilter]       = useState("all");
   const [statusFilter,   setStatusFilter]    = useState("all");
+  const [isEditingIssuer, setIsEditingIssuer] = useState(false);
+  const [issuerEditForm,  setIssuerEditForm]  = useState({});
+  const [editSaveMsg,     setEditSaveMsg]     = useState("");
+  const [issuerSaveError, setIssuerSaveError] = useState("");
 
   const [form, setForm] = useState({
     email: "", university_id: "", issuer_name: "", department: "",
@@ -55,6 +59,34 @@ export default function IssuersPage() {
       qc.invalidateQueries(["admin-dashboard-summary"]);
     },
   });
+
+  const updateIssuerMut = useMutation({
+  mutationFn: ({ id, data }) => updateIssuer(id, data),
+    onSuccess: async () => {
+      await qc.refetchQueries({ queryKey: ["admin-universities"] });
+      await qc.refetchQueries({ queryKey: ["admin-issuer-detail", selectedId] });
+      setIsEditingIssuer(false);
+      setIssuerSaveError("");
+      setEditSaveMsg("Changes saved.");
+      setTimeout(() => setEditSaveMsg(""), 3000);
+    },
+    onError: (err) => {
+      setIssuerSaveError(
+        err?.response?.data?.detail || "Failed to save. Please try again."
+      );
+    },
+  });
+
+  const startEditIssuer = (detail) => {
+    setIssuerSaveError("");
+    setIssuerEditForm({
+      issuer_name:   detail.issuer_name   ?? "",
+      department:    detail.department    ?? "",
+      email:         detail.email         ?? "",
+      university_id: detail.university?.id ?? "",
+    });
+    setIsEditingIssuer(true);
+  };
 
   const resetMut = useMutation({
     mutationFn: (userId) => resetIssuerPassword(userId),
@@ -466,34 +498,140 @@ const allIssuers = universities
                   </button>
                 </div>
 
-                {/* Detail grid */}
-                <div className="px-6 py-5 grid grid-cols-2 gap-4 text-sm
-                                 border-b border-slate-100">
-                  <DetailRow icon={Building2} label="University"
-                    value={selectedIssuer.university?.university_name || "—"} />
-                  <DetailRow icon={Hash} label="Department Code"
-                    value={selectedIssuer.department_code || "—"} mono />
-                  <DetailRow icon={Building2} label="Department"
-                    value={selectedIssuer.department || "Not specified"} />
-                  <DetailRow icon={Building2} label="Institution Code"
-                    value={selectedIssuer.university?.university_code
-                      ? `#${selectedIssuer.university.university_code}`
-                      : "—"} mono />
-                  <DetailRow icon={Calendar} label="Account Created"
-                    value={new Date(selectedIssuer.created_at)
-                      .toLocaleDateString(undefined, {
-                        year: "numeric", month: "short", day: "numeric",
-                      })} />
-                  <DetailRow icon={Calendar} label="Last Login"
-                    value={
-                      selectedIssuer.last_login
-                        ? new Date(selectedIssuer.last_login)
-                            .toLocaleString(undefined, {
-                              dateStyle: "medium", timeStyle: "short",
-                            })
-                        : "Never logged in"
-                    } />
-                </div>
+                {editSaveMsg && (
+  <div className="mx-5 mt-3 flex items-center gap-2 bg-green-50
+                   border border-green-200 text-green-700 text-sm
+                   px-4 py-2.5 rounded-lg">
+    <Check className="w-4 h-4" />
+    {editSaveMsg}
+  </div>
+)}
+
+                {isEditingIssuer ? (
+                  <div className="px-5 py-5 border-b border-slate-100">
+                    <p className="text-xs font-semibold text-sky-600 uppercase
+                                   tracking-wide mb-4">
+                      Editing Issuer Account
+                    </p>
+                    <div className="space-y-3">
+                      {[
+                        { key: "issuer_name",  label: "Issuer Name",  type: "text",
+                          placeholder: "Dr. Kwame Mensah" },
+                        { key: "department",   label: "Department",   type: "text",
+                          placeholder: "Faculty of Engineering" },
+                        { key: "email",        label: "Email Address",type: "email",
+                          placeholder: "registrar@university.edu" },
+                      ].map(({ key, label, type, placeholder }) => (
+                        <div key={key}>
+                          <label className="block text-xs font-medium text-slate-600 mb-1">
+                            {label}
+                          </label>
+                          <input type={type}
+                            className="w-full px-3 py-2 border border-slate-200 rounded-lg
+                                       text-sm focus:outline-none focus:ring-2
+                                       focus:ring-sky-500 bg-white"
+                            placeholder={placeholder}
+                            value={issuerEditForm[key]}
+                            onChange={e => setIssuerEditForm(p => ({
+                              ...p, [key]: e.target.value
+                            }))} />
+                        </div>
+                      ))}
+
+                      <div>
+                        <label className="block text-xs font-medium text-slate-600 mb-1">
+                          University
+                        </label>
+                        <select
+                          className="w-full px-3 py-2 border border-slate-200 rounded-lg
+                                     text-sm focus:outline-none focus:ring-2
+                                     focus:ring-sky-500 bg-white"
+                          value={issuerEditForm.university_id}
+                          onChange={e => setIssuerEditForm(p => ({
+                            ...p, university_id: parseInt(e.target.value)
+                          }))}>
+                          {trusted.map(u => (
+                            <option key={u.id} value={u.id}>{u.university_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3 mt-4">
+                      <button
+                        onClick={() => updateIssuerMut.mutate({
+                          id:   selectedId,
+                          data: Object.fromEntries(
+                            Object.entries(issuerEditForm).filter(([, v]) => v !== "")
+                          ),
+                        })}
+                        disabled={updateIssuerMut.isPending}
+                        className="flex items-center gap-2 bg-sky-600 hover:bg-sky-700
+                                   text-white text-sm font-semibold px-4 py-2 rounded-lg
+                                   disabled:opacity-50 transition-colors"
+                      >
+                        {updateIssuerMut.isPending
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Check className="w-4 h-4" />}
+                        Save
+                      </button>
+                      <button
+                        onClick={() => setIsEditingIssuer(false)}
+                        className="px-4 py-2 border border-slate-200 rounded-lg
+                                   text-sm text-slate-600 hover:bg-slate-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    {issuerSaveError && (
+                      <p className="text-red-600 text-sm mt-2 bg-red-50 border border-red-200
+                                     px-3 py-2 rounded-lg">
+                        {issuerSaveError}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="px-5 py-5 border-b border-slate-100">
+                    <div className="flex justify-end mb-3">
+                      <button
+                        onClick={() => startEditIssuer(selectedIssuer)}
+                        className="flex items-center gap-1.5 text-xs text-sky-600
+                                   hover:text-sky-800 font-medium border border-sky-200
+                                   hover:bg-sky-50 px-3 py-1.5 rounded-lg transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                        Edit Details
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <DetailRow icon={Building2} label="University"
+                        value={selectedIssuer.university?.university_name || "—"} />
+                      <DetailRow icon={Hash} label="Department Code"
+                        value={selectedIssuer.department_code || "—"} mono />
+                      <DetailRow icon={Building2} label="Department"
+                        value={selectedIssuer.department || "Not specified"} />
+                      <DetailRow icon={Building2} label="Institution Code"
+                        value={selectedIssuer.university?.university_code
+                          ? `#${selectedIssuer.university.university_code}`
+                          : "—"} mono />
+                      <DetailRow icon={Calendar} label="Account Created"
+                        value={new Date(selectedIssuer.created_at)
+                          .toLocaleDateString(undefined, {
+                            year: "numeric", month: "short", day: "numeric",
+                          })} />
+                      <DetailRow icon={Calendar} label="Last Login"
+                        value={
+                          selectedIssuer.last_login
+                            ? new Date(selectedIssuer.last_login)
+                                .toLocaleString(undefined, {
+                                  dateStyle: "medium", timeStyle: "short",
+                                })
+                            : "Never logged in"
+                        } />
+                    </div>
+                  </div>
+                )}
 
                 {/* Upload stats */}
                 <div className="px-6 py-5 border-b border-slate-100">

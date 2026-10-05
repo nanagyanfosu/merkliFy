@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import {
   X, ChevronLeft, ChevronRight, ShieldCheck,
-  XCircle, Clock, AlertCircle,
+  XCircle, Clock, AlertCircle, Trash2,
 } from "lucide-react";
 import Badge from "./Badge";
 
@@ -23,6 +23,7 @@ export default function CertificateDetailModal({
   currentIndex,
   total,
   onAction,          // function(newStatus) — triggers confirm flow
+  onDeleteBatch,     // function(batchId) — delete whole batch from detail
   actionLoading,
 }) {
   // Keyboard navigation
@@ -163,6 +164,17 @@ export default function CertificateDetailModal({
                       </>
                     )}
                   </div>
+
+                  {onDeleteBatch && detail && (
+                    <button
+                      onClick={() => onDeleteBatch(detail.batch_id)}
+                      className="text-xs text-red-500 hover:text-red-700
+                                  flex items-center gap-1.5 mt-3 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete entire batch
+                    </button>
+                  )}
                 </div>
               )}
 

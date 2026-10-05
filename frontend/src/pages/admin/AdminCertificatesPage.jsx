@@ -4,6 +4,7 @@ import api from "../../api/axios";
 import {
   adminGetCertificateStatus,
   adminChangeCertificateStatus,
+  deleteAdminBatch,
 } from "../../api/admin";
 import Badge from "../../components/ui/Badge";
 import ConfirmModal from "../../components/ui/ConfirmModal";
@@ -77,6 +78,15 @@ export default function AdminCertificatesPage() {
       setModal(null); setReason("");
       qc.invalidateQueries(["admin-cert-status"]);
       qc.invalidateQueries(["admin-certs-browse"]);
+    },
+  });
+
+  const deleteBatchMut = useMutation({
+    mutationFn: (batchId) => deleteAdminBatch(batchId),
+    onSuccess: () => {
+      setOverlayIndex(null);
+      qc.invalidateQueries(["admin-certs-browse"]);
+      qc.invalidateQueries(["admin-certs-uni-summary"]);
     },
   });
 
@@ -295,6 +305,7 @@ export default function AdminCertificatesPage() {
           currentIndex={overlayIndex}
           total={results.length}
           onAction={(newStatus) => setModal({ newStatus })}
+          onDeleteBatch={(batchId) => deleteBatchMut.mutate(batchId)}
           actionLoading={changeMut.isPending}
         />
       )}
