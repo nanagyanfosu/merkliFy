@@ -15,9 +15,9 @@ export default function IssuerDashboard() {
     queryFn:  getMe,
   });
 
-  const { data: batches = [] } = useQuery({
-    queryKey: ["issuer-batches", {}],
-    queryFn:  () => listBatches({}),
+  const { data: myBatches = [] } = useQuery({
+    queryKey: ["issuer-my-batches"],
+    queryFn:  () => listBatches({ own_only: true }),
   });
 
   const { data: stats } = useQuery({
@@ -30,13 +30,7 @@ export default function IssuerDashboard() {
     queryFn:  () => api.get("/issuer/status-stats").then(r => r.data),
   });
 
-  const { data: recentActivity } = useQuery({
-    queryKey: ["issuer-recent-activity"],
-    queryFn:  () => api.get("/issuer/recent-activity").then(r => r.data),
-    refetchInterval: 60_000,
-  });
-
-  const recentBatches = batches.slice(0, 3);
+  const recentBatches = myBatches.slice(0, 3);
   const totalCerts   = stats?.total_certificates || 0;
   const totalBatches = stats?.total_batches || 0;
 
@@ -190,44 +184,51 @@ export default function IssuerDashboard() {
           )}
         </div>
 
-        {/* Recent activity feed */}
+        {/* Recent batches — replaces the removed activity feed */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4
                            border-b border-slate-100">
             <h2 className="font-semibold text-slate-700 text-sm">
-              Recent Activity
+              Recent Uploads
             </h2>
-            <Link to="/issuer/certificates"
+            <Link to="/issuer/batches"
               className="text-xs text-teal-600 hover:underline">
-              All certificates →
+              View all →
             </Link>
           </div>
 
-          {!recentActivity?.length ? (
+          {recentBatches.length === 0 ? (
             <div className="px-5 py-8 text-center">
-              <p className="text-slate-400 text-sm">
-                No recent status changes.
-              </p>
+              <p className="text-slate-400 text-sm">No batches uploaded yet.</p>
+              <Link to="/issuer/upload"
+                className="text-teal-600 text-sm hover:underline mt-1 block">
+                Upload your first batch →
+              </Link>
             </div>
           ) : (
             <div className="divide-y divide-slate-50">
-              {recentActivity.slice(0, 5).map((item, i) => (
-                <div key={i}
-                  className="flex items-start gap-3 px-5 py-3.5">
-                  <StatusIcon status={item.new_status} />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-slate-800 truncate">
-                      {item.fullname}
+              {recentBatches.map(b => (
+                <Link key={b.batch_id}
+                  to={`/issuer/batches/${b.batch_id}`}
+                  className="flex items-center gap-4 px-5 py-3.5
+                               hover:bg-slate-50 transition-colors"
+                >
+                  <div className="bg-teal-50 p-2 rounded-lg flex-shrink-0">
+                    <Hash className="w-4 h-4 text-teal-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm text-slate-800 truncate">
+                      {b.batch_name}
                     </p>
                     <p className="text-xs text-slate-400">
-                      {item.old_status} → {item.new_status}
-                      {item.reason ? ` · "${item.reason}"` : ""}
+                      {b.academic_year} · {b.total_certificates} cert
+                      {b.total_certificates !== 1 ? "s" : ""}
                     </p>
                   </div>
                   <p className="text-xs text-slate-400 flex-shrink-0">
-                    {new Date(item.changed_at).toLocaleDateString()}
+                    {new Date(b.created_at).toLocaleDateString()}
                   </p>
-                </div>
+                </Link>
               ))}
             </div>
           )}

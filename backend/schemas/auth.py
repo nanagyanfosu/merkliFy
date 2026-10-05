@@ -1,7 +1,9 @@
+from typing import Optional
+
 from pydantic import BaseModel, EmailStr
 
 
-class LoginRequest(BaseModel):
+class LoginRequest(BaseModel):  
     email: EmailStr
     password: str
 
@@ -27,3 +29,13 @@ class SetupPasswordRequest(BaseModel):
     know the temp password by authenticating successfully.
     """
     new_password: str
+
+class UpdateIssuerRequest(BaseModel):
+    """
+    Editable fields for an issuer account.
+    Email changes are validated for uniqueness server-side.
+    """
+    issuer_name:   Optional[str] = None
+    department:    Optional[str] = None
+    email:         Optional[str] = None
+    university_id: Optional[int] = None

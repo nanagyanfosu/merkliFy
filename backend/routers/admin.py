@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel as PydanticBase, validator
 
 from backend.database import get_db
-from backend.dependencies import require_admin
+from backend.dependencies import require_admin, require_issuer
 from backend.models.user import User, UserRole
 from backend.schemas.university import CreateUniversityRequest, RegisterUniversityResponse
 from backend.services import issuer_registry_service
@@ -24,13 +24,14 @@ from backend.services.status_service import (
     change_certificate_status,
     get_status_history_for_university,
 )
-from backend.schemas.status import StatusChangeRequest, CertificateSearchRequest
+from backend.schemas.status import StatusChangeRequest, StatusChangeResponse, CertificateSearchRequest
 from backend.models.verification_log import VerificationLog
 from backend.models.university import University
 from backend.models.pending_registration import PendingRegistration
 from backend.services.issuer_registry_service import register_university
-from backend.schemas.university import CreateUniversityRequest
+from backend.schemas.university import CreateUniversityRequest, UpdateUniversityRequest
 from backend.models.university import University
+from backend.schemas.auth import UpdateIssuerRequest
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -142,6 +143,15 @@ def get_dashboard_summary(
                 }
                 for u in pending_unis
             ],
+            "trusted_list": [
+                {
+                    "id":              u.id,
+                    "university_code": u.university_code,
+                    "university_name": u.university_name,
+                    "location":        u.location or "—",
+                }
+                for u in trusted_unis
+            ],
         },
         "issuers": {
             "total":         len(all_issuers),
@@ -177,6 +187,50 @@ def list_universities(
 ):
 
     return issuer_registry_service.list_universities_with_issuers(db)
+
+
+@router.patch("/universities/{university_id}")
+def update_university(
+    university_id: int,
+    payload: UpdateUniversityRequest,
+    db:    Session = Depends(get_db),
+    admin: User    = Depends(require_admin),
+):
+    uni = db.query(University).filter(
+        University.id == university_id
+    ).first()
+
+    if not uni:
+        raise HTTPException(status_code=404, detail="University not found.")
+
+    clearable = [
+        "official_email", "phone", "website_url",
+        "year_established", "student_population",
+    ]
+    required = ["university_name", "institution_type", "location", "domain"]
+    editable = required + clearable
+
+    updated = []
+    for field in editable:
+        if field in payload.model_fields_set:
+            val = getattr(payload, field, None)
+            if field in required and val is None:
+                continue
+            setattr(uni, field, val)
+            updated.append(field)
+
+    if not updated:
+        raise HTTPException(
+            status_code=400, detail="No fields provided for update."
+        )
+
+    db.commit()
+    db.refresh(uni)
+
+    return {
+        "message": "University updated successfully.",
+        "updated_fields": updated,
+    }
 
 
 @router.patch("/universities/{university_id}/trust")
@@ -305,7 +359,7 @@ def admin_get_cert_status(
     return get_certificate_status_detail(db=db, certificate_id=certificate_id, requesting_user=admin)
 
 
-@router.patch("/certificates/{certificate_id}/status")
+@router.patch("/certificates/{certificate_id}/status", response_model=StatusChangeResponse)
 def admin_change_cert_status(
     certificate_id: int,
     payload: StatusChangeRequest,
@@ -438,23 +492,14 @@ def get_recent_activity(
     }
 
 
-@router.get(
-    "/issuers/{user_id}",
-    summary="Get full detail for a single issuer account",
-)
+@router.get("/issuers/{user_id}")
 def get_issuer_detail(
     user_id: int,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    db:      Session = Depends(get_db),
+    admin:   User    = Depends(require_admin),
 ):
-    """Returns full profile for a single issuer including upload stats."""
-    from backend.models.batch import CertificateBatch
-    from backend.models.certificate import CertificateRecord
-    from backend.models.university import University
-
     issuer = db.query(User).filter(
-        User.id == user_id,
-        User.role == UserRole.ISSUER,
+        User.id == user_id, User.role == UserRole.ISSUER,
     ).first()
 
     if not issuer:
@@ -466,22 +511,26 @@ def get_issuer_detail(
             University.id == issuer.university_id
         ).first()
 
-    # Upload stats scoped to this issuer's own uploads
     total_batches = db.query(CertificateBatch).filter(
         CertificateBatch.uploaded_by == issuer.id
     ).count()
 
-    total_certs = db.query(CertificateRecord).join(
-        CertificateBatch,
-        CertificateRecord.batch_id == CertificateBatch.id
-    ).filter(
-        CertificateBatch.uploaded_by == issuer.id
-    ).count()
+    # Count certificates in those batches
+    total_certs = (
+        db.query(CertificateRecord)
+        .join(CertificateBatch,
+              CertificateRecord.batch_id == CertificateBatch.id)
+        .filter(CertificateBatch.uploaded_by == issuer.id)
+        .count()
+    )
 
-    # Most recent batch
-    last_batch = db.query(CertificateBatch).filter(
-        CertificateBatch.uploaded_by == issuer.id
-    ).order_by(CertificateBatch.created_at.desc()).first()
+    # Most recent batch by this issuer
+    last_batch = (
+        db.query(CertificateBatch)
+        .filter(CertificateBatch.uploaded_by == issuer.id)
+        .order_by(CertificateBatch.created_at.desc())
+        .first()
+    )
 
     return {
         "id":               issuer.id,
@@ -501,13 +550,77 @@ def get_issuer_detail(
             "trust_status":    uni.trust_status   if uni else None,
         } if uni else None,
         "stats": {
-            "total_batches":    total_batches,
-            "total_certs":      total_certs,
-            "last_batch_name":  last_batch.batch_name
-                                if last_batch else None,
-            "last_batch_date":  last_batch.created_at.isoformat()
-                                if last_batch else None,
+            "total_batches":   total_batches,
+            "total_certs":     total_certs,
+            "last_batch_name": last_batch.batch_name   if last_batch else None,
+            "last_batch_date": last_batch.created_at.isoformat()
+                               if last_batch else None,
         },
+    }
+
+
+@router.patch("/issuers/{user_id}")
+def update_issuer(
+    user_id: int,
+    payload: UpdateIssuerRequest,
+    db:    Session = Depends(get_db),
+    admin: User    = Depends(require_admin),
+):
+    """
+    Updates editable fields on an issuer account.
+    Password, role, and department_code are not editable here.
+    """
+    issuer = db.query(User).filter(
+        User.id == user_id,
+        User.role == UserRole.ISSUER,
+    ).first()
+
+    if not issuer:
+        raise HTTPException(status_code=404, detail="Issuer not found.")
+
+    editable = ["issuer_name", "department", "email", "university_id"]
+    updated  = []
+
+    for field in editable:
+        val = getattr(payload, field, None)
+        if val is not None:
+            # Validate email uniqueness if changing email
+            if field == "email":
+                val = val.strip().lower()
+                existing = db.query(User).filter(
+                    User.email == val,
+                    User.id != user_id,
+                ).first()
+                if existing:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="This email is already in use by another account."
+                    )
+            # Validate university exists if changing
+            if field == "university_id":
+                uni = db.query(University).filter(
+                    University.id == val
+                ).first()
+                if not uni:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="University not found."
+                    )
+            setattr(issuer, field, val)
+            updated.append(field)
+
+    if not updated:
+        raise HTTPException(
+            status_code=400,
+            detail="No fields provided for update."
+        )
+
+    db.commit()
+    db.refresh(issuer)
+
+    return {
+        "message": f"Issuer '{issuer.email}' updated successfully.",
+        "updated_fields": updated,
     }
 
 
@@ -710,3 +823,4 @@ def get_universities_cert_summary(
         })
 
     return result
+

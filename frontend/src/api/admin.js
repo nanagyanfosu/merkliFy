@@ -16,6 +16,18 @@ export const listUniversities = () =>
 export const registerUniversity = (data) =>
   api.post("/admin/universities", data).then(r => r.data);
 
+export const createUniversity = (data) =>
+  api.post("/admin/universities", data).then(r => r.data);
+
+export const updateUniversity = (id, data) =>
+  api.patch(`/admin/universities/${id}`, data).then(r => r.data);
+
+export const trustUniversity = (id) =>
+  api.patch(`/admin/universities/${id}/trust`).then(r => r.data);
+
+export const updateIssuer = (id, data) =>
+  api.patch(`/admin/issuers/${id}`, data).then(r => r.data);
+
 export const updateTrustStatus = (universityId, status) =>
   api.patch(`/admin/universities/${universityId}/trust?status=${status}`).then(r => r.data);
 
@@ -60,3 +72,6 @@ export const approvePendingRegistration = (id) =>
 
 export const rejectPendingRegistration = (id) =>
   api.post(`/admin/pending-registrations/${id}/reject`).then(r => r.data);
+
+export const deleteAdminBatch = (batchId) =>
+  api.delete(`/admin/batches/${batchId}`).then(r => r.data);
