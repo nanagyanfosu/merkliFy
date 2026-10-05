@@ -56,7 +56,7 @@ const handleSubmit = async (e) => {
             <ShieldCheck className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h1 className="text-white font-bold text-xl">merkliFy</h1>
+            <h1 className="text-white font-bold text-xl">MerkliFy</h1>
             <p className="text-brand-200 text-xs">Administrator Portal</p>
           </div>
         </div>
@@ -112,20 +112,6 @@ const handleSubmit = async (e) => {
               {loading ? "Signing in…" : "Sign in to Admin Portal"}
             </button>
           </form>
-
-          <div className="mt-6 pt-5 border-t border-slate-100 space-y-2 text-center">
-            <p className="text-slate-400 text-xs">
-              Not an administrator?
-            </p>
-            <div className="flex justify-center gap-4 text-xs">
-              <Link to="/issuer/login" className="text-teal-600 hover:underline">
-                Issuer login →
-              </Link>
-              <Link to="/" className="text-slate-400 hover:underline">
-                Public verification →
-              </Link>
-            </div>
-          </div>
         </div>
       </div>
     </div>

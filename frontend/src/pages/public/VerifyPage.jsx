@@ -116,11 +116,10 @@ export default function VerifyPage() {
       <div className="max-w-xl mx-auto px-6 py-12">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-900 mb-1">
-            Verify an academic degree
+            Verify an academic record
           </h1>
           <p className="text-slate-500 text-sm leading-relaxed">
-            Enter three details from the certificate. We will check
-            everything else automatically.
+            Enter these details from the certificate you are looking for.
           </p>
         </div>
 
@@ -129,10 +128,10 @@ export default function VerifyPage() {
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
 
             <FormField label="Serial Number"
-              hint="The reference number printed on the certificate">
+              >
               <input
                 className="input font-mono"
-                placeholder="e.g. CS2025-001"
+                placeholder="e.g. 1010010010101"
                 value={form.serial_number}
                 onChange={e => handleFieldChange("serial_number", e.target.value)}
                 required
@@ -151,7 +150,7 @@ export default function VerifyPage() {
             </FormField>
 
             <FormField label="Issuing Institution"
-              hint="The university or college that issued the certificate">
+              >
               {institutions.length > 0 ? (
                 <select
                   className="input"
@@ -208,12 +207,12 @@ export default function VerifyPage() {
               )}
             </div>
 
-            {cooldown > 0 && (
+            {/* {cooldown > 0 && (
               <p className="text-xs text-slate-400">
                 Please wait {cooldown} second{cooldown !== 1 ? "s" : ""} before
                 verifying again. Editing any field above will reset this.
               </p>
-            )}
+            )} */}
           </form>
         </div>
 

@@ -11,7 +11,7 @@ export default function IssuerLoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Already logged in as issuer — go straight to dashboard
+
   if (user?.role === "ISSUER") {
     return <Navigate to="/issuer" replace />;
   }
@@ -58,7 +58,7 @@ const handleSubmit = async (e) => {
             <GraduationCap className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h1 className="text-white font-bold text-xl">merkliFy</h1>
+            <h1 className="text-white font-bold text-xl">MerkliFy</h1>
             <p className="text-teal-200 text-xs">Institutional Issuer Portal</p>
           </div>
         </div>
@@ -117,22 +117,6 @@ const handleSubmit = async (e) => {
             </button>
           </form>
 
-          {/* Forgot password — intentionally minimal */}
-          <div className="mt-4 p-3 bg-slate-50 rounded-lg">
-            <p className="text-xs text-slate-500 text-center">
-              Forgot your password? Contact your system administrator to
-              reset your credentials.
-            </p>
-          </div>
-
-          <div className="mt-5 pt-5 border-t border-slate-100 space-y-2 text-center">
-            <p className="text-slate-400 text-xs">Not an issuer?</p>
-            <div className="flex justify-center gap-4 text-xs">
-              <Link to="/" className="text-slate-400 hover:underline">
-                Verify a certificate →
-              </Link>
-            </div>
-          </div>
         </div>
       </div>
     </div>

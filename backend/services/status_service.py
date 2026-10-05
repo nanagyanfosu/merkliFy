@@ -1,9 +1,6 @@
-from datetime import datetime
-from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 from fastapi import HTTPException
-
+from sqlalchemy import or_
 from backend.models.certificate import CertificateRecord
 from backend.models.batch import CertificateBatch
 from backend.models.status import (
@@ -34,9 +31,8 @@ VALID_TRANSITIONS: dict[CertificateLifecycleStatus, set[CertificateLifecycleStat
     CertificateLifecycleStatus.REVOKED: set(),  # terminal — no transitions allowed
 }
 
-
 def change_certificate_status(
-    db:              Session,
+    db:             Session,
     certificate_id: int,
     payload:        StatusChangeRequest,
     requesting_user: User,
@@ -56,7 +52,7 @@ def change_certificate_status(
                 detail="You can only manage certificates from your institution."
             )
 
-        batch = cert.batch or db.query(CertificateBatch).filter(
+        batch = db.query(CertificateBatch).filter(
             CertificateBatch.id == cert.batch_id
         ).first()
 
@@ -85,22 +81,7 @@ def change_certificate_status(
         db.flush()
 
     old_status = status_record.current_status
-    if isinstance(old_status, str):
-        try:
-            old_status = CertificateLifecycleStatus(old_status)
-        except ValueError:
-            pass
-
     new_status = payload.new_status
-    if isinstance(new_status, str):
-        try:
-            new_status = CertificateLifecycleStatus(new_status)
-        except ValueError:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid new status '{new_status}'."
-            )
-
     reason = payload.reason
 
     if old_status == CertificateLifecycleStatus.REVOKED:
@@ -111,27 +92,24 @@ def change_certificate_status(
     if old_status == new_status:
         raise HTTPException(
             status_code=400,
-            detail=f"Certificate is already {new_status.value if hasattr(new_status, 'value') else new_status}."
+            detail=f"Certificate is already {new_status.value}."
         )
 
     if new_status not in VALID_TRANSITIONS.get(old_status, set()):
-        old_val = old_status.value if hasattr(old_status, 'value') else str(old_status)
-        new_val = new_status.value if hasattr(new_status, 'value') else str(new_status)
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot transition certificate from {old_val} to {new_val}."
+            detail=f"Cannot transition certificate from {old_status.value} to {new_status.value}."
         )
 
     status_record.current_status = new_status
     db.add(CertificateStatusHistory(
         certificate_id=certificate_id,
         changed_by=requesting_user.id,
-        old_status=old_status.value if hasattr(old_status, 'value') else str(old_status),
-        new_status=new_status.value if hasattr(new_status, 'value') else str(new_status),
+        old_status=old_status.value if isinstance(old_status, CertificateLifecycleStatus) else str(old_status),
+        new_status=new_status.value if isinstance(new_status, CertificateLifecycleStatus) else str(new_status),
         reason=reason,
     ))
     db.commit()
-    db.refresh(status_record)
 
     return StatusChangeResponse(
         certificate_id=certificate_id,
@@ -141,7 +119,7 @@ def change_certificate_status(
         new_status=new_status,
         changed_by_email=requesting_user.email,
         reason=reason,
-        message=f"Status changed to {new_status.value if hasattr(new_status, 'value') else new_status}.",
+        message=f"Status changed to {new_status.value}.",
     )
 
 def get_certificate_status_detail(
@@ -167,17 +145,19 @@ def get_certificate_status_detail(
     if certificate is None:
         raise HTTPException(status_code=404, detail="Certificate not found.")
 
-    # Scoped: issuers see only their own university's certificates
+    batch = (
+        db.query(CertificateBatch)
+        .filter(CertificateBatch.id == certificate.batch_id)
+        .first()
+    )
+
+    # Ownership check for issuers
     if requesting_user.role == UserRole.ISSUER:
-        if requesting_user.university_id != certificate.university_id:
+        if requesting_user.university_id != batch.university_id:
             raise HTTPException(
                 status_code=403,
                 detail="You are not authorised to view certificates from another institution.",
             )
-
-    batch = certificate.batch or db.query(CertificateBatch).filter(
-        CertificateBatch.id == certificate.batch_id
-    ).first()
 
     status_record = (
         db.query(CertificateStatus)
@@ -190,16 +170,11 @@ def get_certificate_status_detail(
         if status_record
         else CertificateLifecycleStatus.ACTIVE
     )
-    if isinstance(current_status, str):
-        try:
-            current_status = CertificateLifecycleStatus(current_status)
-        except ValueError:
-            pass
 
     # Fetch full history ordered oldest → newest
     history_raw = (
         db.query(CertificateStatusHistory, User)
-        .outerjoin(User, CertificateStatusHistory.changed_by == User.id)
+        .join(User, CertificateStatusHistory.changed_by == User.id)
         .filter(CertificateStatusHistory.certificate_id == certificate_id)
         .order_by(CertificateStatusHistory.changed_at.asc())
         .all()
@@ -210,9 +185,9 @@ def get_certificate_status_detail(
             id=h.id,
             old_status=h.old_status,
             new_status=h.new_status,
-            changed_by_email=u.email if u else "System",
+            changed_by_email=u.email,
             reason=h.reason,
-            changed_at=h.changed_at.isoformat() if hasattr(h.changed_at, "isoformat") else str(h.changed_at or ""),
+            changed_at=h.changed_at.isoformat(),
         )
         for h, u in history_raw
     ]
@@ -225,8 +200,8 @@ def get_certificate_status_detail(
         graduation_year=certificate.graduation_year,
         issuer=certificate.issuer,
         current_status=current_status,
-        batch_id=batch.id if batch else certificate.batch_id,
-        batch_name=batch.batch_name if batch else "Unknown Batch",
+        batch_id=batch.id,
+        batch_name=batch.batch_name,
         history=history,
     )
 
@@ -255,17 +230,11 @@ def search_certificates(
             CertificateBatch.university_id == requesting_user.university_id
         )
 
-    # Apply search filters
-    has_filter = any([
-        search.serial_number,
-        search.fullname,
-        search.program,
-        search.graduation_year is not None,
-        search.status,
-        search.academic_year is not None,
-    ])
-
-    if not has_filter:
+    # Default sort for admins: by issuer/university
+    # Default sort for issuers: by department (uploaded_by)
+    if not search.serial_number and not search.fullname and \
+       not search.program and not search.graduation_year and \
+       not search.status and not search.academic_year:
         # No filters — load all with sensible default sort
         if requesting_user.role == UserRole.ISSUER:
             query = query.order_by(
@@ -278,16 +247,15 @@ def search_certificates(
                 CertificateRecord.serial_number.asc()
             )
     else:
+        # Apply search filters
         if search.serial_number:
-            val = search.serial_number.strip()
-            if search.exact_match:
-                query = query.filter(CertificateRecord.serial_number.ilike(val))
-            else:
-                query = query.filter(
-                    CertificateRecord.serial_number.ilike(f"%{val}%")
+            query = query.filter(
+                CertificateRecord.serial_number.ilike(
+                    search.serial_number.strip().lower()
                 )
+            )
         if search.fullname:
-            val = search.fullname.strip()
+            val = search.fullname.strip().lower()
             if search.exact_match:
                 query = query.filter(CertificateRecord.fullname.ilike(val))
             else:
@@ -295,18 +263,18 @@ def search_certificates(
                     CertificateRecord.fullname.ilike(f"%{val}%")
                 )
         if search.program:
-            val = search.program.strip()
+            val = search.program.strip().lower()
             if search.exact_match:
                 query = query.filter(CertificateRecord.program.ilike(val))
             else:
                 query = query.filter(
                     CertificateRecord.program.ilike(f"%{val}%")
                 )
-        if search.graduation_year is not None:
+        if search.graduation_year:
             query = query.filter(
                 CertificateRecord.graduation_year == search.graduation_year
             )
-        if search.academic_year is not None:
+        if search.academic_year:
             query = query.filter(
                 CertificateBatch.academic_year == search.academic_year
             )
@@ -320,27 +288,18 @@ def search_certificates(
                     status_code=400,
                     detail=f"Invalid status '{search.status}'."
                 )
-            if status_enum == CertificateLifecycleStatus.ACTIVE:
-                query = query.outerjoin(
-                    CertificateStatus,
-                    CertificateRecord.id == CertificateStatus.certificate_id
-                ).filter(
-                    or_(
-                        CertificateStatus.current_status == status_enum,
-                        CertificateStatus.current_status == None,
-                    )
-                )
-            else:
-                query = query.join(
-                    CertificateStatus,
-                    CertificateRecord.id == CertificateStatus.certificate_id
-                ).filter(CertificateStatus.current_status == status_enum)
+            query = query.join(
+                CertificateStatus,
+                CertificateRecord.id == CertificateStatus.certificate_id
+            ).filter(CertificateStatus.current_status == status_enum)
 
-        sort_field = search.sort_by if hasattr(search, "sort_by") and search.sort_by else "serial_number"
-        sort_col = getattr(CertificateRecord, sort_field, None) or CertificateRecord.serial_number
-        sort_dir = getattr(search, "sort_dir", "asc") or "asc"
+        sort_col = getattr(
+            CertificateRecord,
+            search.sort_by,
+            CertificateRecord.serial_number
+        )
         query = query.order_by(
-            sort_col.desc() if sort_dir.lower() == "desc"
+            sort_col.desc() if search.sort_dir == "desc"
             else sort_col.asc()
         )
 
@@ -348,22 +307,22 @@ def search_certificates(
     records = query.offset(offset).limit(min(limit, 200)).all()
 
     cert_ids = [r.id for r in records]
-    status_map = {}
-    if cert_ids:
+    status_map = {
+        s.certificate_id: s.current_status
         for s in db.query(CertificateStatus).filter(
             CertificateStatus.certificate_id.in_(cert_ids)
-        ).all():
-            status_map[s.certificate_id] = s.current_status
+        ).all()
+    }
 
     # For issuers: fetch uploader names to show department context
     uploader_map = {}
-    if requesting_user.role == UserRole.ISSUER and records:
-        batch_ids = list({r.batch_id for r in records if r.batch_id})
+    if requesting_user.role == UserRole.ISSUER:
+        batch_ids = list({r.batch_id for r in records})
         batches = db.query(CertificateBatch).filter(
             CertificateBatch.id.in_(batch_ids)
-        ).all() if batch_ids else []
+        ).all()
         uploader_ids = list({b.uploaded_by for b in batches if b.uploaded_by})
-        uploaders = db.query(User).filter(User.id.in_(uploader_ids)).all() if uploader_ids else []
+        uploaders = db.query(User).filter(User.id.in_(uploader_ids)).all()
         uploader_name_map = {
             u.id: (u.department or u.issuer_name or u.email)
             for u in uploaders
@@ -383,8 +342,6 @@ def search_certificates(
 
     results = []
     for r in records:
-        raw_status = status_map.get(r.id, CertificateLifecycleStatus.ACTIVE)
-        status_val = raw_status.value if hasattr(raw_status, "value") else str(raw_status)
         item = {
             "certificate_id":  r.id,
             "serial_number":   r.serial_number,
@@ -392,9 +349,11 @@ def search_certificates(
             "program":         r.program,
             "graduation_year": r.graduation_year,
             "issuer":          r.issuer,
-            "current_status":  status_val,
+            "current_status":  status_map.get(
+                r.id, CertificateLifecycleStatus.ACTIVE
+            ).value,
             "batch_id":        r.batch_id,
-            "academic_year":   r.batch.academic_year if hasattr(r, "batch") and r.batch else None,
+            "academic_year":   r.batch.academic_year if r.batch else None,
             "is_owner":        (
                 r.batch_id in batch_ownership
                 if requesting_user.role == UserRole.ISSUER
@@ -408,7 +367,7 @@ def search_certificates(
     broad_warning = (
         not search.exact_match
         and total > 50
-        and bool(search.program or search.fullname)
+        and (search.program or search.fullname)
     )
 
     return {
@@ -418,7 +377,6 @@ def search_certificates(
         "results":       results,
         "broad_warning": broad_warning,
     }
-
 
 def get_status_history_for_university(
     db: Session,
@@ -448,20 +406,15 @@ def get_status_history_for_university(
             CertificateRecord,
             CertificateStatusHistory.certificate_id == CertificateRecord.id
         )
-        .outerjoin(
+        .join(
             CertificateBatch,
             CertificateRecord.batch_id == CertificateBatch.id
         )
-        .outerjoin(
+        .join(
             User,
             CertificateStatusHistory.changed_by == User.id
         )
-        .filter(
-            or_(
-                CertificateRecord.university_id == university_id,
-                CertificateBatch.university_id == university_id,
-            )
-        )
+        .filter(CertificateBatch.university_id == university_id)
         .order_by(CertificateStatusHistory.changed_at.desc())
     )
 
@@ -480,9 +433,9 @@ def get_status_history_for_university(
                 "fullname": c.fullname,
                 "old_status": h.old_status,
                 "new_status": h.new_status,
-                "changed_by": u.email if u else "Unknown",
+                "changed_by": u.email,
                 "reason": h.reason,
-                "changed_at": h.changed_at.isoformat() if hasattr(h.changed_at, "isoformat") else str(h.changed_at or ""),
+                "changed_at": h.changed_at.isoformat(),
             }
             for h, c, u in rows
         ],

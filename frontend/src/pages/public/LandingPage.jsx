@@ -96,28 +96,48 @@ function LandingNav() {
 // ── HERO ──────────────────────────────────────────────────────────────────
 
 function Hero() {
+  const [hash, setHash] = useState("8f3a91c2...7b42d1e0");
+
+  useEffect(() => {
+    const hashCharacters = "0123456789abcdef";
+    const createHash = () => Array.from({ length: 16 }, () =>
+      hashCharacters[Math.floor(Math.random() * hashCharacters.length)]
+    ).join("");
+    const interval = setInterval(() => {
+      const nextHash = createHash();
+      setHash(`${nextHash.slice(0, 8)}...${nextHash.slice(-8)}`);
+    }, 900);
+
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <section className="bg-slate-900 text-white pt-14 min-h-[600px]
                          flex items-center">
-      <div className="max-w-5xl mx-auto px-6 py-20 md:py-28 w-full">
-        <div className="max-w-2xl">
-          <h1 className="text-6xl md:text-5xl font-bold leading-tight
+      <div className="max-w-6xl mx-auto px-6 py-20 md:py-24 w-full">
+        <div className="grid lg:grid-cols-[0.9fr_1.1fr] gap-14 lg:gap-16
+                        items-center">
+          <div className="max-w-xl">
+          <h1 className="text-7xl md:text-7xl font-bold leading-[0.95]
                           tracking-tight mb-5 text-white">
-            Verify academic degrees
+            Don't Just Trust It. 
             <br />
-            <span className="text-teal-400">without calling anyone.</span>
+            <span className="text-teal-400">Verify It.</span>
           </h1>
 
-          <p className="text-slate-400 text-lg leading-relaxed mb-4">
-            Universities upload graduate records once.
-            Employers verify any certificate instantly. Free,
-            with no account required.
+          {/* <div className="space-y-1.5 text-slate-300 text-base leading-relaxed mb-6">
+            <p>Don't call the university.</p>
+            <p>Don't rely on a screenshot.</p>
+            <p>Don't take the document at face value.</p>
+          </div> */}
+
+          <p className="text-white text-lg font-semibold leading-relaxed mb-3">
+            Verify the data. Verify the issuer. Verify the integrity.
           </p>
 
-          <p className="text-slate-500 text-base leading-relaxed mb-10">
-            Each certificate receives a cryptographic seal the moment
-            it is issued. Any change to any detail breaks that seal.
-            What you receive is a mathematical proof, not a phone call.
+          <p className="text-slate-400 text-base leading-relaxed mb-10">
+            MerkliFy turns thousands of academic credentials into verifiable cryptographic
+            records.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3">
@@ -126,35 +146,119 @@ function Hero() {
                           bg-teal-600 hover:bg-teal-500 text-white
                           font-semibold px-6 py-3 rounded-lg text-sm
                           transition-colors">
-              Verify a degree now
+              Verify Now
               <ArrowRight className="w-4 h-4" />
             </Link>
-            <a href="#how-it-works"
-              className="inline-flex items-center justify-center gap-2
-                          border border-slate-700 hover:border-slate-500
-                          text-slate-400 hover:text-slate-200 font-medium
-                          px-6 py-3 rounded-lg text-sm transition-colors">
-              See how it works
-            </a>
           </div>
-        </div>
+          <p className="mt-8 text-xs font-mono tracking-widest text-slate-500">
+            SHA-256&nbsp;&nbsp;/&nbsp;&nbsp;MERKLE TREES&nbsp;&nbsp;/&nbsp;&nbsp;RSA SIGNATURES
+          </p>
+          </div>
 
-        {/* Stats strip */}
-        <AnimatedSection delay={200}
-          className="mt-16 pt-8 border-t border-slate-800
-                      grid grid-cols-2 md:grid-cols-4 gap-8">
-          {[
-            { value: "12,400+",   label: "Degrees Issued" },
-            { value: "98%",       label: "Faster Than Manual Checks" },
-            { value: "100%",      label: "Tamper Detection Rate" },
-            { value: "Under 2s",  label: "Time Per Verification" },
-          ].map(({ value, label }) => (
-            <div key={label}>
-              <p className="text-2xl font-bold text-teal-400">{value}</p>
-              <p className="text-slate-500 text-xs mt-0.5">{label}</p>
+          <AnimatedSection delay={180} className="relative">
+            <div className="border border-slate-700 bg-slate-800/70 rounded-2xl
+                            p-5 md:p-7 shadow-2xl shadow-slate-950/30 overflow-hidden">
+              <div aria-hidden="true" className="absolute inset-0 pointer-events-none
+                              overflow-hidden font-mono text-[10px] leading-7
+                              text-teal-300/[0.06] select-none">
+                <p className="absolute -rotate-6 -right-8 top-10 whitespace-nowrap">
+                  {hash} &nbsp; {hash} &nbsp; {hash}
+                </p>
+                <p className="absolute rotate-3 -left-10 bottom-16 whitespace-nowrap">
+                  {hash.split("").reverse().join("")} &nbsp; {hash} &nbsp; {hash}
+                </p>
+                <p className="absolute rotate-[-18deg] right-12 bottom-4 whitespace-nowrap">
+                  {hash} &nbsp; {hash.split("").reverse().join("")}
+                </p>
+              </div>
+              <div className="flex items-center justify-between mb-6">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
+                  Verification pipeline
+                </p>
+                <span className="flex items-center gap-1.5 text-[11px] font-medium
+                                 text-teal-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                  Live proof
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-[1.15fr_0.85fr]
+                              gap-4 items-stretch">
+                <div className="border border-slate-600 bg-slate-900/80 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <FileCheck className="w-4 h-4 text-teal-400" />
+                    <span className="text-xs font-semibold text-slate-300">
+                      Academic certificate
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    <div className="h-2 w-4/5 rounded bg-slate-700" />
+                    <div className="h-2 w-3/5 rounded bg-slate-700" />
+                    <div className="h-2 w-2/3 rounded bg-slate-700" />
+                  </div>
+                  <div className="mt-5 flex items-center justify-between border-t
+                                  border-slate-800 pt-3">
+                    <span className="text-[10px] text-slate-500">CERT-2025-001</span>
+                    <span className="text-[10px] text-slate-500">ISSUED</span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col justify-center gap-3">
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500">
+                    SHA-256 hash
+                  </div>
+                  <div className="font-mono text-[10px] leading-relaxed text-teal-300
+                                  bg-teal-400/5 border border-teal-400/20 rounded-lg p-3">
+                    {hash}
+                  </div>
+                  <ArrowRight className="hidden sm:block w-4 h-4 text-slate-600 mx-auto" />
+                </div>
+              </div>
+
+              <div className="my-5 border-t border-slate-700" />
+
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <div className="flex-1 w-full">
+                  <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-3">
+                    Merkle tree proof
+                  </p>
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="space-y-2">
+                      <span className="block w-14 h-7 rounded border border-teal-400/30
+                                      bg-teal-400/10 text-center pt-2 text-[9px] text-teal-300">H1</span>
+                      <span className="block w-14 h-7 rounded border border-teal-400/30
+                                      bg-teal-400/10 text-center pt-2 text-[9px] text-teal-300">H2</span>
+                    </div>
+                    <div className="text-slate-600 text-xs">+</div>
+                    <div className="space-y-2">
+                      <span className="block w-14 h-7 rounded border border-slate-600
+                                      bg-slate-900 text-center pt-2 text-[9px] text-slate-400">H3</span>
+                      <span className="block w-14 h-7 rounded border border-slate-600
+                                      bg-slate-900 text-center pt-2 text-[9px] text-slate-400">H4</span>
+                    </div>
+                    <ArrowRight className="w-4 h-4 text-slate-600 mx-1" />
+                    <span className="w-16 h-10 rounded-lg border border-teal-400/40
+                                    bg-teal-400/10 text-center pt-3 text-[9px] font-semibold
+                                    text-teal-300">ROOT</span>
+                  </div>
+                </div>
+
+                <div className="hidden sm:block h-16 border-l border-slate-700" />
+
+                <div className="w-full sm:w-40 rounded-xl border border-emerald-400/40
+                                bg-emerald-400/10 p-4 text-center">
+                  <CheckCircle2 className="w-7 h-7 text-emerald-400 mx-auto mb-2" />
+                  <p className="text-sm font-bold tracking-wider text-emerald-300">
+                    VERIFIED
+                  </p>
+                  <p className="text-[10px] text-emerald-400/70 mt-1">
+                    Certificate is valid
+                  </p>
+                </div>
+              </div>
             </div>
-          ))}
-        </AnimatedSection>
+          </AnimatedSection>
+        </div>
       </div>
     </section>
   );
@@ -186,7 +290,7 @@ function HowItWorks() {
               {
                 step: "01", icon: Building2,
                 title: "Upload graduate data",
-                body: "An authorised staff member uploads a spreadsheet of graduate records. The system checks every row before touching anything.",
+                body: "An authorised staff member uploads graduate records. The system checks every row before touching anything.",
               },
               {
                 step: "02", icon: Lock,
@@ -254,7 +358,7 @@ function HowItWorks() {
           className="mt-8 p-4 bg-slate-50 rounded-xl border border-slate-100">
           <p className="text-sm text-slate-500 leading-relaxed">
             <span className="font-medium text-slate-700">No blockchain.</span>{" "}
-            MerkliFy uses SHA-256, Merkle Trees, and RSA — the same
+            MerkliFy uses SHA-256, Merkle Trees, and RSA. The same
             cryptographic building blocks behind HTTPS, banking infrastructure,
             and code signing. No distributed ledger needed.
           </p>
@@ -266,7 +370,28 @@ function HowItWorks() {
 
 // ── DEMO ──────────────────────────────────────────────────────────────────
 
+const DEMO_VIDEO_URL = "https://youtu.be/_ohaBIzOalQ";
+
+function getYouTubeEmbedUrl(url) {
+  if (!url) return "";
+
+  try {
+    const parsedUrl = new URL(url);
+    const videoId = parsedUrl.hostname === "youtu.be"
+      ? parsedUrl.pathname.slice(1)
+      : parsedUrl.searchParams.get("v") || parsedUrl.pathname.split("/").pop();
+
+    return videoId
+      ? `https://www.youtube-nocookie.com/embed/${videoId}`
+      : "";
+  } catch {
+    return "";
+  }
+}
+
 function DemoSection() {
+  const videoUrl = getYouTubeEmbedUrl(DEMO_VIDEO_URL);
+
   return (
     /* Same background as the hero — slate-900 */
     <section id="demo" className="bg-slate-900 py-16">
@@ -277,26 +402,36 @@ function DemoSection() {
           </h2>
           <p className="text-slate-400 text-sm leading-relaxed">
             A short demonstration of how a university issues certificates
-            and how an employer verifies one — start to finish.
+            and how an employer verifies one; from start to finish.
           </p>
         </AnimatedSection>
 
         <div className="bg-slate-800 border border-slate-700 rounded-xl
                          aspect-video flex items-center justify-center
-                         max-w-3xl">
-          <div className="text-center">
-            <div className="w-14 h-14 bg-teal-500/20 border border-teal-500/30
-                             rounded-full flex items-center justify-center
-                             mx-auto mb-3">
-              <Play className="w-6 h-6 text-teal-400 ml-0.5" />
+                         max-w-3xl overflow-hidden">
+          {videoUrl ? (
+            <iframe
+              className="w-full h-full"
+              src={videoUrl}
+              title="MerkliFy certificate verification walkthrough"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          ) : (
+            <div className="text-center">
+              <div className="w-14 h-14 bg-teal-500/20 border border-teal-500/30
+                               rounded-full flex items-center justify-center
+                               mx-auto mb-3">
+                <Play className="w-6 h-6 text-teal-400 ml-0.5" />
+              </div>
+              <p className="text-slate-400 text-sm font-medium">
+                Demo coming soon
+              </p>
+              <p className="text-slate-600 text-xs mt-1">
+                Full walkthrough of issuance and verification
+              </p>
             </div>
-            <p className="text-slate-400 text-sm font-medium">
-              Demo coming soon
-            </p>
-            <p className="text-slate-600 text-xs mt-1">
-              Full walkthrough of issuance and verification
-            </p>
-          </div>
+          )}
         </div>
       </div>
     </section>
@@ -495,7 +630,6 @@ function SupportedInstitutions() {
             Supported Institutions
           </h2>
           <p className="text-slate-500 text-base max-w-lg mx-auto leading-relaxed">
-            Universities and institutions registered and verified on MerkliFy.
             Certificates from these institutions are immediately verifiable
             by anyone.
           </p>
@@ -518,7 +652,7 @@ function SupportedInstitutions() {
                 </div>
                 <div className="min-w-0">
                   <p className="font-semibold text-slate-800 text-sm truncate">
-                    {inst.name}
+                    {inst.university_name}
                   </p>
                   <div className="flex items-center gap-1 mt-0.5">
                     <ShieldCheck className="w-3 h-3 text-teal-500 flex-shrink-0" />
@@ -562,7 +696,7 @@ function LandingFooter() {
           <div>
             <p className="font-bold text-white text-sm">MerkliFy</p>
             <p className="text-slate-600 text-xs">
-              Cryptographic Certificate Verification
+              Cryptographic Academic Certificate Verification 
             </p>
           </div>
         </div>
@@ -575,7 +709,7 @@ function LandingFooter() {
         {/* Links */}
         <div className="flex items-center gap-5">
           <a
-            href="https://github.com/yourusername/merklify"
+            href="https://github.com/nanagyanfosu/merklify"
             target="_blank"
             rel="noopener noreferrer"
             className="text-slate-500 hover:text-slate-300 text-xs
@@ -603,7 +737,7 @@ function LandingFooter() {
             GitHub
           </a>
           <span className="text-slate-700 text-xs">
-            For institution access, contact your administrator.
+            Theoford Nana Gyanfosu
           </span>
         </div>
       </div>
