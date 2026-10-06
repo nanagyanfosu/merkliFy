@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { setupPassword } from "../../api/auth";
+import { getErrorMessage } from "../../utils/errors";
 import { KeyRound, Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
 
 export default function ChangePasswordPage() {
@@ -42,7 +43,7 @@ export default function ChangePasswordPage() {
       markPasswordChanged();
       navigate(user?.role === "ADMIN" ? "/admin" : "/issuer", { replace: true });
     } catch (err) {
-      setError(err.response?.data?.detail || "Failed to set password. Please try again.");
+      setError(getErrorMessage(err, "We couldn't set your password. Please try again."));
     } finally {
       setLoading(false);
     }

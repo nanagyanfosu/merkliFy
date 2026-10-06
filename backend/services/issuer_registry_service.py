@@ -101,7 +101,7 @@ def update_trust_status(db: Session, university_id: int, new_status: str) -> dic
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid status '{new_status}'. Must be: PENDING, TRUSTED, or REVOKED",
+            detail="That institution status is not available. Please choose a valid status.",
         )
 
     db.commit()
@@ -122,6 +122,6 @@ def get_university_for_signing(db: Session, university_id: int) -> University:
     if not university.encrypted_private_key:
         raise HTTPException(
             status_code=500,
-            detail=f"University ID {university_id} has no signing key. Contact admin.",
+            detail="This institution is not ready to issue certificates yet. Please contact an administrator.",
         )
     return university

@@ -20,7 +20,6 @@ from backend.schemas.status import (
     CertificateSearchRequest,
 )
 from backend.services import upload_service, batch_service, status_service
-from backend.services.batch_service import delete_batch as batch_delete_service
 
 
 router = APIRouter(prefix="/issuer", tags=["issuer"])
@@ -157,40 +156,6 @@ def get_batch(
     if current_user.university_id is None:
         raise HTTPException(status_code=403, detail="Account not linked to a university.")
     return batch_service.get_batch_detail(db, batch_id, current_user.university_id)
-
-
-@router.delete("/batches/{batch_id}")
-def delete_own_batch(
-    batch_id:     int,
-    db:           Session = Depends(get_db),
-    current_user: User    = Depends(require_issuer),
-):
-    """
-    Issuers can only delete batches they uploaded.
-    """
-    batch = db.query(CertificateBatch).filter(
-        CertificateBatch.id == batch_id
-    ).first()
-
-    if not batch:
-        raise HTTPException(status_code=404, detail="Batch not found.")
-
-    if batch.university_id != current_user.university_id:
-        raise HTTPException(
-            status_code=403,
-            detail="This batch does not belong to your institution."
-        )
-
-    if batch.uploaded_by != current_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "You can only delete batches you uploaded. "
-                "Contact a system administrator to delete this batch."
-            ),
-        )
-
-    return batch_service.delete_batch(db, batch_id)
 
 
 @router.get("/batches/{batch_id}/certificates")
@@ -784,7 +749,7 @@ def delete_batch(
     Permanently deletes a batch and all its certificates.
     The requesting issuer must be the one who uploaded this batch.
     """
-    return batch_delete_service(
+    return batch_service.delete_batch(
         db=db,
         batch_id=batch_id,
         requesting_user=current_user,

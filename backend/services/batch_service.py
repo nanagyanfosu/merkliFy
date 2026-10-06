@@ -4,9 +4,11 @@ from fastapi import HTTPException
 
 from backend.models.batch import CertificateBatch
 from backend.models.certificate import CertificateRecord
+from backend.models.university import University
 from backend.models.merkle import MerkleProof
 from backend.models.status import CertificateStatus, CertificateLifecycleStatus
-from backend.models.user import User
+from backend.models.user import User, UserRole
+from backend.models.activity_event import ActivityEvent
 from backend.schemas.certificate import CertificateRowInput, BatchUploadResponse
 from backend.services.hashing_service import hash_certificate
 from backend.services.merkle_service import build_merkle_tree
@@ -82,7 +84,10 @@ def process_batch(
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail=f"Database constraint error: {str(e.orig)}",
+            detail=(
+                "We couldn't save this batch because some information "
+                "conflicts with existing records."
+            ),
         )
 
     return BatchUploadResponse(
@@ -153,6 +158,23 @@ def _persist_batch(
             current_status=CertificateLifecycleStatus.ACTIVE,
         ))
 
+    university = db.query(University).filter(
+        University.id == university_id
+    ).first()
+    uploader = (
+        db.query(User).filter(User.id == uploaded_by).first()
+        if uploaded_by else None
+    )
+    db.add(ActivityEvent(
+        event_type="BATCH_UPLOADED",
+        batch_id=batch.id,
+        batch_name=batch.batch_name,
+        certificate_count=batch.total_certificates,
+        university_id=university_id,
+        university_name=university.university_name if university else "Unknown",
+        actor_user_id=uploaded_by,
+        actor_email=uploader.email if uploader else "System",
+    ))
     db.commit()
     db.refresh(batch)
     return batch
@@ -351,8 +373,7 @@ def delete_batch(db: Session, batch_id: int, requesting_user: User) -> dict:
       - Issuers can only delete batches they personally uploaded
         (batch.uploaded_by == requesting_user.id)
       - No other issuer can delete another issuer's batch
-      - Admins do not have delete access through this system —
-        deletion is an issuer self-service action only
+      - Admins can delete any batch
 
     What gets deleted (in order, to respect foreign key constraints):
       1. certificate_status_history rows for each cert in the batch
@@ -375,22 +396,22 @@ def delete_batch(db: Session, batch_id: int, requesting_user: User) -> dict:
     if not batch:
         raise HTTPException(status_code=404, detail="Batch not found.")
 
-    # Confirm it belongs to this issuer's university
-    if batch.university_id != requesting_user.university_id:
-        raise HTTPException(
-            status_code=403,
-            detail="This batch does not belong to your institution."
-        )
+    if requesting_user.role != UserRole.ADMIN:
+        # Issuers may only delete batches from their institution that they uploaded.
+        if batch.university_id != requesting_user.university_id:
+            raise HTTPException(
+                status_code=403,
+                detail="This batch does not belong to your institution."
+            )
 
-    # Confirm this issuer uploaded it
-    if batch.uploaded_by != requesting_user.id:
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "You can only delete batches you uploaded. "
-                "This batch was uploaded by another department."
-            ),
-        )
+        if batch.uploaded_by != requesting_user.id:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "You can only delete batches you uploaded. "
+                    "This batch was uploaded by another department."
+                ),
+            )
 
     # Collect all cert IDs in this batch
     cert_ids = [
@@ -402,6 +423,19 @@ def delete_batch(db: Session, batch_id: int, requesting_user: User) -> dict:
 
     total_certs = len(cert_ids)
     batch_name  = batch.batch_name
+    university = db.query(University).filter(
+        University.id == batch.university_id
+    ).first()
+    db.add(ActivityEvent(
+        event_type="BATCH_DELETED",
+        batch_id=batch.id,
+        batch_name=batch_name,
+        certificate_count=total_certs,
+        university_id=batch.university_id,
+        university_name=university.university_name if university else "Unknown",
+        actor_user_id=requesting_user.id,
+        actor_email=requesting_user.email,
+    ))
 
     if cert_ids:
         # Step 1 — delete history entries

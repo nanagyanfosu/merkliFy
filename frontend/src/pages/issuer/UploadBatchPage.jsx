@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { uploadBatch } from "../../api/issuer";
+import { getErrorMessage } from "../../utils/errors";
 import { Upload, FileText, CheckCircle2, Loader2, X } from "lucide-react";
 
 export default function UploadBatchPage() {
@@ -115,10 +116,14 @@ export default function UploadBatchPage() {
           {mutation.isError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
               {typeof errors === "string"
-                ? errors
+                ? getErrorMessage(mutation.error)
                 : errors?.message
                 ? (<>
-                    <p className="font-medium mb-1">{errors.message}</p>
+                    <p className="font-medium mb-1">
+                      {errors.message.startsWith("Validation failed")
+                        ? "Some certificate details are missing or invalid."
+                        : errors.message}
+                    </p>
                     {errors.errors?.slice(0, 5).map((e, i) => (
                       <p key={i} className="text-xs">Row {e.row} · {e.field}: {e.error}</p>
                     ))}

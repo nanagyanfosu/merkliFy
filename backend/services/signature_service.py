@@ -71,7 +71,7 @@ def sign_merkle_root(merkle_root_hex: str, university) -> str:
         from fastapi import HTTPException
         raise HTTPException(
             status_code=500,
-            detail=f"No private key found for university ID {university.id}",
+            detail="This institution is not ready to issue certificates yet. Please contact an administrator.",
         )
 
     # Decrypt — lives only in this local scope

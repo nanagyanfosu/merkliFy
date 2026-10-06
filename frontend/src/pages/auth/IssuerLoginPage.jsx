@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import { getErrorMessage } from "../../utils/errors";
 import { GraduationCap, Loader2, Lock } from "lucide-react";
 
 export default function IssuerLoginPage() {
@@ -39,10 +40,7 @@ const handleSubmit = async (e) => {
       navigate("/admin");
     }
   } catch (err) {
-    setError(
-      err.response?.data?.detail ||
-      "Login failed. Please check your credentials."
-    );
+    setError(getErrorMessage(err, "Login failed. Please check your email and password."));
   } finally {
     setLoading(false);
   }

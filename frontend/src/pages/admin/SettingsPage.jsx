@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { getMe } from "../../api/auth";
 import { getRecentActivity } from "../../api/admin";
 import ChangePasswordForm from "../../components/ui/ChangePasswordForm";
-import { Settings, User, ShieldCheck, Activity, Link } from "lucide-react";
+import {
+  Settings, User, ShieldCheck, Activity, Link, Upload, Trash2,
+} from "lucide-react";
 import { Link as RouterLink } from "react-router-dom";
 
 const TABS = [
@@ -147,6 +149,52 @@ export default function AdminSettingsPage() {
             </ActivitySection>
           )}
 
+          {/* Batch lifecycle events */}
+          <ActivitySection
+            title="Batch Uploads and Deletions"
+            count={activity?.batch_events?.length ?? 0}
+            accent="teal"
+          >
+            {activity?.batch_events?.length === 0 ? (
+              <p className="text-slate-400 text-sm py-2">
+                No batch uploads or deletions recorded yet.
+              </p>
+            ) : (
+              activity?.batch_events?.map((event, i) => {
+                const uploaded = event.event_type === "BATCH_UPLOADED";
+                return (
+                  <div key={`${event.created_at}-${event.batch_id}-${i}`}
+                       className="flex items-start gap-3 py-2.5
+                                  border-b border-slate-50 last:border-0">
+                    <span className={`p-1.5 rounded-lg flex-shrink-0 ${
+                      uploaded
+                        ? "bg-teal-50 text-teal-600"
+                        : "bg-red-50 text-red-600"
+                    }`}>
+                      {uploaded
+                        ? <Upload className="w-3.5 h-3.5" />
+                        : <Trash2 className="w-3.5 h-3.5" />}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800">
+                        {uploaded ? "Batch uploaded" : "Batch deleted"}:{" "}
+                        <span className="font-semibold">{event.batch_name}</span>
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {event.university_name} · {event.certificate_count}{" "}
+                        certificate{event.certificate_count === 1 ? "" : "s"}
+                        {" · by "}{event.actor_email}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {new Date(event.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </ActivitySection>
+
           {/* Recent status changes */}
           <ActivitySection
             title="Recent Certificate Status Changes"
@@ -219,14 +267,8 @@ export default function AdminSettingsPage() {
 }
 
 function ActivitySection({ title, count, accent, children }) {
-  const accents = {
-    amber: "border-amber-300 bg-amber-50",
-    blue:  "border-sky-300 bg-sky-50",
-    red:   "border-red-300 bg-red-50",
-    slate: "border-slate-200 bg-white",
-  };
   return (
-    <div className={`card overflow-hidden border-l-4 ${accents[accent]}`}>
+    <div className="card overflow-hidden">
       <div className="px-5 py-3 border-b border-slate-100 flex items-center
                        justify-between">
         <h3 className="font-semibold text-slate-700 text-sm">{title}</h3>

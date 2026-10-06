@@ -26,7 +26,8 @@ export default function AdminCertificatesPage() {
   // Overlay state
   const [overlayIndex, setOverlayIndex] = useState(null); // index in results
   const [modal,        setModal]        = useState(null);
-  const [reason,       setReason]       = useState("");
+  const [deleteBatchId, setDeleteBatchId] = useState(null);
+  const [reason,        setReason]        = useState("");
 
   // University summary for filter dropdown
   const { data: uniSummary = [] } = useQuery({
@@ -84,6 +85,7 @@ export default function AdminCertificatesPage() {
   const deleteBatchMut = useMutation({
     mutationFn: (batchId) => deleteAdminBatch(batchId),
     onSuccess: () => {
+      setDeleteBatchId(null);
       setOverlayIndex(null);
       qc.invalidateQueries(["admin-certs-browse"]);
       qc.invalidateQueries(["admin-certs-uni-summary"]);
@@ -305,10 +307,21 @@ export default function AdminCertificatesPage() {
           currentIndex={overlayIndex}
           total={results.length}
           onAction={(newStatus) => setModal({ newStatus })}
-          onDeleteBatch={(batchId) => deleteBatchMut.mutate(batchId)}
+          onDeleteBatch={(batchId) => setDeleteBatchId(batchId)}
           actionLoading={changeMut.isPending}
         />
       )}
+
+      <ConfirmModal
+        open={deleteBatchId !== null}
+        onClose={() => setDeleteBatchId(null)}
+        title="Delete This Batch"
+        message="This permanently deletes the batch and all of its certificates. This cannot be undone."
+        confirmLabel="Delete Permanently"
+        confirmClass="btn-danger"
+        loading={deleteBatchMut.isPending}
+        onConfirm={() => deleteBatchMut.mutate(deleteBatchId)}
+      />
 
       {/* Confirm action modal */}
       <ConfirmModal

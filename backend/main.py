@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.routers import auth, admin, issuer, verification, setup, registration
+from backend.database import Base, engine
+from backend import models  # noqa: F401 - register all models before table creation
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -15,6 +17,9 @@ app = FastAPI(
     description="Cryptographic Academic Certificate Verification System",
     version="1.0.0",
 )
+
+# Create newly introduced tables in deployments that do not run migrations.
+Base.metadata.create_all(bind=engine)
 
 # In production, ALLOWED_ORIGINS is set in environment variables
 # In development, it defaults to localhost

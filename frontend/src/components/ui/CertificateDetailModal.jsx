@@ -165,16 +165,19 @@ export default function CertificateDetailModal({
                     )}
                   </div>
 
-                  {onDeleteBatch && detail && (
-                    <button
-                      onClick={() => onDeleteBatch(detail.batch_id)}
-                      className="text-xs text-red-500 hover:text-red-700
-                                  flex items-center gap-1.5 mt-3 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete entire batch
-                    </button>
-                  )}
+                </div>
+              )}
+
+              {onDeleteBatch && detail && (
+                <div className="pt-4 border-t border-slate-100">
+                  <button
+                    onClick={() => onDeleteBatch(detail.batch_id)}
+                    className="text-xs text-red-500 hover:text-red-700
+                                flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete entire batch
+                  </button>
                 </div>
               )}
 

@@ -5,6 +5,7 @@ import {
   createUniversity,
 } from "../../api/admin";
 import Badge from "../../components/ui/Badge";
+import { getErrorMessage } from "../../utils/errors";
 import {
   Building2, ChevronDown, ChevronUp, Pencil, X,
   Check, Loader2, Globe, Phone, Mail, Calendar,
@@ -58,7 +59,7 @@ export default function UniversitiesPage() {
     },
     onError: (err) => {
       setSaveError(
-        err?.response?.data?.detail || "Failed to save. Please try again."
+        getErrorMessage(err, "We couldn't save the changes. Please try again.")
       );
     },
   });
@@ -74,7 +75,7 @@ export default function UniversitiesPage() {
     },
     onError: (err) => {
       setSaveError(
-        err?.response?.data?.detail || "Failed to create university."
+        getErrorMessage(err, "We couldn't register the institution. Please try again.")
       );
     },
   });

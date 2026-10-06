@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import { getErrorMessage } from "../../utils/errors";
 import { ShieldCheck, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
@@ -23,9 +24,7 @@ export default function LoginPage() {
         navigate(data.role === "ADMIN" ? "/admin" : "/issuer");
       }
     } catch (err) {
-      setError(
-        err.response?.data?.detail || "Login failed. Check your credentials."
-      );
+      setError(getErrorMessage(err, "Login failed. Check your email and password."));
     } finally {
       setLoading(false);
     }

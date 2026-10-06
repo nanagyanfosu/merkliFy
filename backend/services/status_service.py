@@ -98,7 +98,7 @@ def change_certificate_status(
     if new_status not in VALID_TRANSITIONS.get(old_status, set()):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot transition certificate from {old_status.value} to {new_status.value}."
+            detail="This certificate cannot be moved to that status."
         )
 
     status_record.current_status = new_status
@@ -286,7 +286,7 @@ def search_certificates(
             except ValueError:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Invalid status '{search.status}'."
+                    detail="That certificate status is not available. Please choose a valid status."
                 )
             query = query.join(
                 CertificateStatus,

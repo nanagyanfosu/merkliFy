@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { verifyCertificate, getInstitutions } from "../../api/verification";
 import ResultCard from "../../components/ui/ResultCard";
 import { Search, Loader2, X } from "lucide-react";
+import { getErrorMessage } from "../../utils/errors";
 
 const DEGREE_TYPES = [
   { label: "Select degree type…", value: "" },
@@ -284,8 +285,8 @@ export default function VerifyFormInline() {
       {mutation.isError && (
         <div className="mt-4 bg-red-50 border border-red-200
                          text-red-700 text-sm px-4 py-3 rounded-lg">
-          {mutation.error?.response?.data?.detail ||
-            "Verification request failed. Please check your connection and try again."}
+          {getErrorMessage(mutation.error,
+            "Verification request failed. Please check your connection and try again.")}
         </div>
       )}
 

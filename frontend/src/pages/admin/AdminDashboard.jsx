@@ -238,16 +238,9 @@ function StatCard({ icon: Icon, color, label, value, sub, subAlert, trend, trend
 }
 
 function SummaryCard({ title, count, accent, link, children }) {
-  const accents = {
-    amber: "border-l-amber-300",
-    blue:  "border-l-sky-300",
-    green: "border-l-teal-300",
-    slate: "border-l-slate-200",
-    red:   "border-l-red-300",
-  };
   return (
     <div className={`bg-white border border-slate-200 rounded-xl
-                      overflow-hidden border-l-4 ${accents[accent] || accents.slate}`}>
+                      overflow-hidden`}>
       <div className="flex items-center justify-between px-5 py-4
                        border-b border-slate-100">
         <div className="flex items-center gap-2">

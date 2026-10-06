@@ -6,3 +6,4 @@ from .certificate import CertificateRecord
 from .merkle import MerkleProof
 from .status import CertificateStatus, CertificateStatusHistory, CertificateLifecycleStatus
 from .verification_log import VerificationLog
+from .activity_event import ActivityEvent

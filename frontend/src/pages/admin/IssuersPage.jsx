@@ -6,6 +6,7 @@ import {
 } from "../../api/admin";
 import ConfirmModal from "../../components/ui/ConfirmModal";
 import Badge from "../../components/ui/Badge";
+import { getErrorMessage } from "../../utils/errors";
 import {
   UserPlus, Loader2, Copy, CheckCircle2,
   RefreshCw, Eye, EyeOff, X, ChevronRight,
@@ -72,7 +73,7 @@ export default function IssuersPage() {
     },
     onError: (err) => {
       setIssuerSaveError(
-        err?.response?.data?.detail || "Failed to save. Please try again."
+        getErrorMessage(err, "We couldn't save the changes. Please try again.")
       );
     },
   });
@@ -363,8 +364,8 @@ const allIssuers = universities
             </div>
             {createMut.isError && (
               <p className="sm:col-span-2 text-red-600 text-sm">
-                {createMut.error?.response?.data?.detail ||
-                  "Failed to create account."}
+                {getErrorMessage(createMut.error,
+                  "We couldn't create the issuer account. Please try again.")}
               </p>
             )}
           </form>

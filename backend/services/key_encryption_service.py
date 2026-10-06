@@ -37,5 +37,5 @@ def decrypt_private_key(encrypted_pem: str) -> str:
         # Do NOT expose the reason — just signal internal failure.
         raise HTTPException(
             status_code=500,
-            detail="Internal cryptographic error. Contact system administrator.",
+            detail="We couldn't complete this secure operation. Please try again or contact support.",
         )

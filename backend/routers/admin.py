@@ -18,6 +18,7 @@ from backend.models.batch import CertificateBatch
 from backend.models.status import CertificateStatus
 from datetime import datetime, timezone
 from backend.models.verification_log import VerificationLog
+from backend.models.activity_event import ActivityEvent
 from backend.services.status_service import (
     search_certificates,
     get_certificate_status_detail,
@@ -29,6 +30,7 @@ from backend.models.verification_log import VerificationLog
 from backend.models.university import University
 from backend.models.pending_registration import PendingRegistration
 from backend.services.issuer_registry_service import register_university
+from backend.services import batch_service
 from backend.schemas.university import CreateUniversityRequest, UpdateUniversityRequest
 from backend.models.university import University
 from backend.schemas.auth import UpdateIssuerRequest
@@ -388,11 +390,12 @@ def get_recent_activity(
     admin: User = Depends(require_admin),
 ):
     """
-    Returns four operational feeds:
+    Returns five operational feeds:
     1. Recent certificate status changes (revocations, suspensions, reinstatements)
     2. Recent anomalous verification attempts (TAMPERED, BATCH_TAMPER, UNTRUSTED)
     3. Universities pending trust approval
     4. Issuer accounts awaiting first login (still on temp password)
+    5. Batch uploads and deletions
     """
 
     #  Recent status changes 
@@ -484,11 +487,28 @@ def get_recent_activity(
         for u in pending_issuers_raw
     ]
 
+    batch_events = [
+        {
+            "event_type": event.event_type,
+            "batch_id": event.batch_id,
+            "batch_name": event.batch_name,
+            "certificate_count": event.certificate_count,
+            "university_name": event.university_name,
+            "actor_email": event.actor_email,
+            "created_at": event.created_at.isoformat(),
+        }
+        for event in db.query(ActivityEvent)
+        .order_by(ActivityEvent.created_at.desc())
+        .limit(20)
+        .all()
+    ]
+
     return {
         "status_changes":    status_changes,
         "anomalies":         anomalies,
         "pending_approvals": pending_approvals,
         "pending_issuers":   pending_issuers,
+        "batch_events":     batch_events,
     }
 
 
@@ -824,3 +844,12 @@ def get_universities_cert_summary(
 
     return result
 
+
+@router.delete("/batches/{batch_id}")
+def delete_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Permanently delete a batch and all certificates belonging to it."""
+    return batch_service.delete_batch(db, batch_id, admin)

@@ -10,6 +10,13 @@ from typing import Optional
 
 MAX_BATCH_SIZE = 10_000
 ALLOWED_EXTENSIONS = {".csv", ".json"}
+REQUIRED_FIELDS = {
+    "serial_number",
+    "fullname",
+    "program",
+    "graduation_year",
+    "issuer",
+}
 
 
 class CertificateRowInput(BaseModel):
@@ -68,7 +75,7 @@ def parse_upload(file: UploadFile, raw_bytes: bytes) -> list[CertificateRowInput
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type '{ext}'. Only .csv and .json are accepted.",
+            detail="This file type is not supported. Please upload a CSV or JSON file.",
         )
 
     if not rows:
@@ -76,7 +83,7 @@ def parse_upload(file: UploadFile, raw_bytes: bytes) -> list[CertificateRowInput
     if len(rows) > MAX_BATCH_SIZE:
         raise HTTPException(
             status_code=400,
-            detail=f"Batch too large. Max {MAX_BATCH_SIZE} certificates per upload.",
+            detail=f"This upload has too many certificates. Please upload no more than {MAX_BATCH_SIZE:,} at a time.",
         )
 
     validated = _validate_rows(rows)
@@ -108,7 +115,10 @@ def _parse_json(raw_bytes: bytes) -> list[dict]:
     try:
         data = json.loads(raw_bytes.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail="We couldn't read this JSON file. Please check its format and try again.",
+        )
 
     if isinstance(data, list):
         rows = data
@@ -125,6 +135,22 @@ def _parse_json(raw_bytes: bytes) -> list[dict]:
 
 def _validate_rows(rows: list[dict]) -> list[CertificateRowInput]:
     validated, errors = [], []
+    available_fields = {
+        str(field).strip().lower()
+        for row in rows
+        for field in row
+    }
+    missing_fields = sorted(REQUIRED_FIELDS - available_fields)
+
+    if missing_fields:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "This file does not use the required certificate format. "
+                "Please include these columns: serial_number, fullname, "
+                "program, graduation_year, and issuer."
+            ),
+        )
 
     for i, row in enumerate(rows, start=1):
         try:

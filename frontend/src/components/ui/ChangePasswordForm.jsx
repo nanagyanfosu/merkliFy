@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { changePassword, verifyPassword } from "../../api/auth";
 import { useAuth } from "../../context/AuthContext";
+import { getErrorMessage } from "../../utils/errors";
 import {
   KeyRound, Loader2, CheckCircle2, Eye, EyeOff,
   ArrowRight, ShieldCheck,
@@ -26,7 +27,7 @@ export default function ChangePasswordForm() {
     mutationFn: () => verifyPassword(current),
     onSuccess:  () => { setStepErr(""); setStep(2); },
     onError:    (err) => setStepErr(
-      err.response?.data?.detail || "Current password is incorrect."
+      getErrorMessage(err, "Current password is incorrect.")
     ),
   });
 
@@ -41,7 +42,7 @@ export default function ChangePasswordForm() {
       setTimeout(() => setSuccess(false), 5000);
     },
     onError: (err) => setStepErr(
-      err.response?.data?.detail || "Failed to update password."
+      getErrorMessage(err, "We couldn't update your password. Please try again.")
     ),
   });
 
