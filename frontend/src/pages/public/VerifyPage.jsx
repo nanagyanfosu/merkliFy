@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { verifyCertificate, getInstitutions } from "../../api/verification";
 import { Search, Loader2, X, ShieldCheck, CheckCircle2,
          AlertCircle, Clock, HelpCircle } from "lucide-react";
+import { getErrorMessage } from "../../utils/errors";
 
 const COOLDOWN_SECONDS = 10;
 
@@ -219,8 +220,8 @@ export default function VerifyPage() {
         {mutation.isError && (
           <div className="mt-4 bg-red-50 border border-red-200 text-red-700
                            text-sm px-4 py-3 rounded-lg">
-            {mutation.error?.response?.data?.detail ||
-              "Something went wrong. Please check your connection and try again."}
+            {getErrorMessage(mutation.error,
+              "Something went wrong. Please check your connection and try again.")}
           </div>
         )}
 

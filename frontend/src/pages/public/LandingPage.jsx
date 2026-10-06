@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import AnimatedSection from "../../components/ui/AnimatedSection";
 import {
   ArrowRight, ShieldCheck, Building2, Search,
-  Lock, FileCheck, Play, Mail, CheckCircle2,
-  AlertCircle, Clock, HelpCircle, ChevronRight,
+  Lock, FileCheck, Mail, CheckCircle2,
+  AlertCircle, Clock, HelpCircle,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { getInstitutions } from "../../api/verification";
@@ -370,28 +370,7 @@ function HowItWorks() {
 
 // ── DEMO ──────────────────────────────────────────────────────────────────
 
-const DEMO_VIDEO_URL = "https://youtu.be/_ohaBIzOalQ";
-
-function getYouTubeEmbedUrl(url) {
-  if (!url) return "";
-
-  try {
-    const parsedUrl = new URL(url);
-    const videoId = parsedUrl.hostname === "youtu.be"
-      ? parsedUrl.pathname.slice(1)
-      : parsedUrl.searchParams.get("v") || parsedUrl.pathname.split("/").pop();
-
-    return videoId
-      ? `https://www.youtube-nocookie.com/embed/${videoId}`
-      : "";
-  } catch {
-    return "";
-  }
-}
-
 function DemoSection() {
-  const videoUrl = getYouTubeEmbedUrl(DEMO_VIDEO_URL);
-
   return (
     /* Same background as the hero — slate-900 */
     <section id="demo" className="bg-slate-900 py-16">
@@ -409,29 +388,16 @@ function DemoSection() {
         <div className="bg-slate-800 border border-slate-700 rounded-xl
                          aspect-video flex items-center justify-center
                          max-w-3xl overflow-hidden">
-          {videoUrl ? (
-            <iframe
-              className="w-full h-full"
-              src={videoUrl}
-              title="MerkliFy certificate verification walkthrough"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
-          ) : (
-            <div className="text-center">
-              <div className="w-14 h-14 bg-teal-500/20 border border-teal-500/30
-                               rounded-full flex items-center justify-center
-                               mx-auto mb-3">
-                <Play className="w-6 h-6 text-teal-400 ml-0.5" />
-              </div>
-              <p className="text-slate-400 text-sm font-medium">
-                Demo coming soon
-              </p>
-              <p className="text-slate-600 text-xs mt-1">
-                Full walkthrough of issuance and verification
-              </p>
-            </div>
-          )}
+          <video
+            aria-label="MerkliFy cryptographic verification walkthrough"
+            className="h-full w-full object-cover"
+            controls
+            playsInline
+            preload="metadata"
+            src="/videos/merklify-walkthrough-soundtrack.mp4"
+          >
+            Your browser does not support HTML video.
+          </video>
         </div>
       </div>
     </section>
