@@ -111,9 +111,9 @@ export function IntroductionScene() {
           </div>
         </div>
 
-        <div style={{ bottom: 60, left: 150, opacity: finalProgress, position: "absolute" }}>
-          <div style={{ color: t.muted, fontSize: 17 }}>Certificate data <span style={{ color: t.accentBright }}>→</span> cryptographic processing <span style={{ color: t.accentBright }}>→</span> verifiable proof</div>
-          <div style={{ color: t.body, fontSize: 16, marginTop: 10 }}>The certificate stays private. MerkliFy verifies its information and cryptographic integrity.</div>
+        <div style={{ bottom: 60, left: 150, opacity: finalProgress, position: "absolute", right: 150 }}>
+          <div style={{ color: t.body, fontSize: 30, fontWeight: 700 }}>Certificate data <span style={{ color: t.accentBright }}>→</span> cryptographic processing <span style={{ color: t.accentBright }}>→</span> verifiable proof</div>
+          <div style={{ color: t.body, fontSize: 25, marginTop: 12 }}>The certificate stays private. MerkliFy verifies its information and cryptographic integrity.</div>
         </div>
       </div>
     </VideoBackground>

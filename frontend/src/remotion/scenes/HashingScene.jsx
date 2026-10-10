@@ -93,7 +93,7 @@ export function HashingScene() {
       <div style={{ height: "100%", padding: "72px 150px", position: "relative" }}>
         <Eyebrow>03 / SHA-256 hashing</Eyebrow>
         <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: "-0.05em", marginTop: 12 }}>Step 1: Create a cryptographic <span style={{ color: t.accentBright }}>fingerprint.</span></div>
-        <div style={{ color: t.muted, fontSize: 17, marginTop: 8 }}>MerkliFy hashes the certificate data using SHA-256.</div>
+        <div style={{ color: t.body, fontSize: 25, marginTop: 10 }}>MerkliFy hashes the certificate data using SHA-256.</div>
         {!comparison && (
           <div style={{ alignItems: "center", display: "flex", gap: 30, marginTop: 36 }}>
             <CertificateDataCard frame={frame} />
@@ -112,14 +112,14 @@ export function HashingScene() {
               <div style={{ color: t.accentBright, fontSize: 35 }}>≠</div>
               <HashDisplay changed hash={modifiedHash} label="Modified Hash" progress={modifiedProgress} />
             </div>
-            <div style={{ color: "#fbbf24", fontSize: 22, fontWeight: 700, marginTop: 28 }}>Change the data → the hash changes.</div>
+            <div style={{ color: "#fbbf24", fontSize: 32, fontWeight: 700, marginTop: 28 }}>Change the data → the hash changes.</div>
           </div>
         )}
         {final && (
           <div style={{ alignItems: "center", display: "flex", gap: 65, marginTop: 75 }}>
-            <div style={{ color: t.body, fontSize: 25, lineHeight: 1.7 }}>Certificate Data<br /><span style={{ color: t.accentBright }}>↓</span><br />SHA-256<br /><span style={{ color: t.accentBright }}>↓</span><br />Cryptographic Fingerprint</div>
+            <div style={{ color: t.body, fontSize: 30, fontWeight: 700, lineHeight: 1.6 }}>Certificate Data<br /><span style={{ color: t.accentBright }}>↓</span><br />SHA-256<br /><span style={{ color: t.accentBright }}>↓</span><br />Cryptographic Fingerprint</div>
             <HashDisplay hash={originalHash} label="One certificate. One cryptographic fingerprint." progress={1} />
-            <div style={{ color: t.muted, fontSize: 18, lineHeight: 1.5, width: 300 }}>This fingerprint helps prove that the certificate data has not been altered.</div>
+            <div style={{ color: t.body, fontSize: 25, lineHeight: 1.4, width: 360 }}>This fingerprint helps prove that the certificate data has not been altered.</div>
           </div>
         )}
       </div>

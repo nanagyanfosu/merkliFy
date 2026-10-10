@@ -47,11 +47,11 @@ export function MerkleTreeScene() {
           <ProofPanel valid={valid} visible={selected} />
         </div>
         <div style={{ bottom: 35, left: 115, position: "absolute" }}>
-          <div style={{ color: selected ? t.body : t.muted, fontSize: 17 }}>
+          <div style={{ color: selected ? t.body : t.muted, fontSize: 29, fontWeight: 600 }}>
             {valid ? "Calculated Root  =  Stored Merkle Root" : selected ? "Follow H3's proof path to the root." : "Now imagine thousands of certificates."}
           </div>
-          {valid && <div style={{ color: t.accentBright, fontSize: 20, fontWeight: 700, marginTop: 8 }}>The certificate belongs to the verified batch.</div>}
-          {valid && frame >= 282 && <div style={{ color: t.heading, fontSize: 19, fontWeight: 700, marginTop: 10 }}>But who signed that root?</div>}
+          {valid && <div style={{ color: t.accentBright, fontSize: 30, fontWeight: 700, marginTop: 12 }}>The certificate belongs to the verified batch.</div>}
+          {valid && frame >= 282 && <div style={{ color: t.heading, fontSize: 28, fontWeight: 700, marginTop: 12 }}>But who signed that root?</div>}
         </div>
       </div>
     </VideoBackground>
